@@ -17,7 +17,6 @@ const ModuleView = ({
   stages,
   taskTypes,
   tasks,
-  stageTemplates,
   onAddTask,
   onUpdateTask,
   priorities,
@@ -28,7 +27,7 @@ const ModuleView = ({
     () => new Map(taskTypes.map((taskType) => [taskType.id, taskType])),
     [taskTypes]
   );
-  const stageOrder = useMemo(() => [...workflow.stageIds], [workflow.stageIds]);
+  const stageOrder = useMemo(() => [...(workflow.stageIds || [])], [workflow.stageIds]);
   const stageOptions = useMemo(() => [...stageOrder], [stageOrder]);
   const defaultPriority = useMemo(
     () => priorities[Math.floor(priorities.length / 2)] || '',
@@ -57,15 +56,6 @@ const ModuleView = ({
     taskId: null,
     form: emptyForm
   });
-
-  const stageTemplateMap = useMemo(() => {
-    const map = new Map();
-    if (!stageTemplates) return map;
-    Object.entries(stageTemplates).forEach(([stageId, items]) => {
-      map.set(stageId, Array.isArray(items) ? items : []);
-    });
-    return map;
-  }, [stageTemplates]);
 
   const taskTreeByStage = useMemo(() => {
     const nodes = new Map();
@@ -117,22 +107,7 @@ const ModuleView = ({
     const groups = stageOrder.map((stageId) => ({
       stageId,
       stage: stageMap.get(stageId),
-      rows: flattenTree(taskTreeByStage.get(stageId) || []),
-      templateRows: (stageTemplateMap.get(stageId) || []).map((template) => ({
-        node: {
-          id: `stage-template-${template.id}`,
-          name: template.name,
-          stageId,
-          taskTypeId: template.taskTypeId || null,
-          description: '',
-          priority: null,
-          status: null,
-          startDate: '',
-          endDate: '',
-          isTemplate: true
-        },
-        depth: 0
-      }))
+      rows: flattenTree(taskTreeByStage.get(stageId) || [])
     }));
 
     const otherStageRoots = [];
@@ -146,13 +121,12 @@ const ModuleView = ({
       groups.push({
         stageId: 'others',
         stage: { id: 'others', name: '其他阶段' },
-        rows: flattenTree(otherStageRoots),
-        templateRows: []
+        rows: flattenTree(otherStageRoots)
       });
     }
 
     return groups;
-  }, [stageMap, stageOrder, stageTemplateMap, taskTreeByStage]);
+  }, [stageMap, stageOrder, taskTreeByStage]);
 
   const openCreateTaskDialog = () => {
     setDialogState({
@@ -295,7 +269,7 @@ const ModuleView = ({
                 <tr className="stage-header">
                   <td colSpan={8}>{group.stage?.name || '未命名阶段'}</td>
                 </tr>
-                {group.rows.length > 0 || group.templateRows.length > 0 ? (
+                {group.rows.length > 0 ? (
                   <>
                     {group.rows.map(({ node, depth }) => (
                       <tr key={node.id}>
@@ -340,29 +314,6 @@ const ModuleView = ({
                               添加子任务
                             </button>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {group.templateRows.map(({ node }) => (
-                      <tr key={node.id} className="template-row">
-                        <td>
-                          <div className="task-name-cell">
-                            <div className="task-name-title">{node.name}</div>
-                            <div className="task-template-hint">来源：阶段默认任务</div>
-                          </div>
-                        </td>
-                        <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
-                        <td>
-                          {node.taskTypeId
-                            ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
-                            : '未指定'}
-                        </td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>--</td>
-                        <td>
-                          <span className="template-tag">阶段任务</span>
                         </td>
                       </tr>
                     ))}
@@ -494,18 +445,17 @@ const ModuleView = ({
                     onChange={(event) => updateDialogForm('endDate', event.target.value)}
                   />
                 </label>
-                <label className="dialog-field dialog-field--wide">
+                <label className="dialog-field dialog-field-full">
                   <span>任务描述</span>
                   <textarea
-                    rows={3}
                     value={dialogState.form.description}
                     onChange={(event) => updateDialogForm('description', event.target.value)}
-                    placeholder="补充任务背景或交付物"
+                    placeholder="补充任务描述"
                   />
                 </label>
               </div>
-              <div className="dialog-footer">
-                <button type="button" className="secondary-action" onClick={closeDialog}>
+              <div className="dialog-actions">
+                <button type="button" className="secondary" onClick={closeDialog}>
                   取消
                 </button>
                 <button type="submit">保存</button>

@@ -1,0 +1,362 @@
+package com.example.flowtask.service
+
+import com.example.flowtask.api.*
+import org.springframework.dao.EmptyResultDataAccessException
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
+import org.springframework.jdbc.core.namedparam.SqlParameterSource
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
+import java.util.UUID
+
+@Service
+class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
+
+    fun getInitialData(): FlowDataResponse {
+        val stages = getStages()
+        val taskTypes = getTaskTypes()
+        val workflows = getWorkflows()
+        val projects = getProjects()
+        val modules = getModules()
+        val tasks = getTasks()
+        return FlowDataResponse(stages, taskTypes, workflows, projects, modules, tasks)
+    }
+
+    fun getStages(): List<Stage> {
+        val sql = "SELECT id, name FROM stages ORDER BY created_at, name"
+        return jdbcTemplate.query(sql) { rs, _ ->
+            Stage(
+                id = rs.getString("id"),
+                name = rs.getString("name")
+            )
+        }
+    }
+
+    fun getTaskTypes(): List<TaskType> {
+        val sql = "SELECT id, name FROM task_types ORDER BY created_at, name"
+        return jdbcTemplate.query(sql) { rs, _ ->
+            TaskType(
+                id = rs.getString("id"),
+                name = rs.getString("name")
+            )
+        }
+    }
+
+    fun getWorkflows(): List<Workflow> {
+        val workflows = jdbcTemplate.query("SELECT id, name FROM workflows ORDER BY created_at, name") { rs, _ ->
+            Workflow(
+                id = rs.getString("id"),
+                name = rs.getString("name"),
+                stageIds = emptyList()
+            )
+        }
+        if (workflows.isEmpty()) {
+            return workflows
+        }
+        val workflowIds = workflows.map { it.id }
+        val stagesSql = """
+            SELECT workflow_id, stage_id
+            FROM workflow_stages
+            WHERE workflow_id IN (:ids)
+            ORDER BY workflow_id, sort_order
+        """
+        val stageMap = jdbcTemplate.query(stagesSql, mapOf("ids" to workflowIds)) { rs, _ ->
+            rs.getString("workflow_id") to rs.getString("stage_id")
+        }.groupBy({ it.first }, { it.second })
+        return workflows.map { workflow ->
+            workflow.copy(stageIds = stageMap[workflow.id] ?: emptyList())
+        }
+    }
+
+    fun getProjects(): List<Project> {
+        val sql = "SELECT id, name, workflow_id FROM projects ORDER BY created_at, name"
+        return jdbcTemplate.query(sql) { rs, _ ->
+            Project(
+                id = rs.getString("id"),
+                name = rs.getString("name"),
+                workflowId = rs.getString("workflow_id")
+            )
+        }
+    }
+
+    fun getModules(): List<Module> {
+        val sql = "SELECT id, project_id, name, workflow_id FROM modules ORDER BY created_at, name"
+        return jdbcTemplate.query(sql) { rs, _ ->
+            Module(
+                id = rs.getString("id"),
+                projectId = rs.getString("project_id"),
+                name = rs.getString("name"),
+                workflowId = rs.getString("workflow_id")
+            )
+        }
+    }
+
+    fun getTasks(): List<Task> {
+        val sql = """
+            SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
+                   start_date, end_date, parent_task_id
+            FROM tasks
+            ORDER BY created_at, name
+        """
+        return jdbcTemplate.query(sql) { rs, _ ->
+            Task(
+                id = rs.getString("id"),
+                moduleId = rs.getString("module_id"),
+                stageId = rs.getString("stage_id"),
+                taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
+                name = rs.getString("name"),
+                description = rs.getString("description"),
+                priority = rs.getString("priority"),
+                status = rs.getString("status"),
+                startDate = rs.getString("start_date"),
+                endDate = rs.getString("end_date"),
+                parentTaskId = rs.getString("parent_task_id")
+            )
+        }
+    }
+
+    @Transactional
+    fun createStage(request: StageRequest): Stage {
+        val id = UUID.randomUUID().toString()
+        val params = MapSqlParameterSource()
+            .addValue("id", id)
+            .addValue("name", request.name.trim())
+        jdbcTemplate.update("INSERT INTO stages(id, name) VALUES (:id, :name)", params)
+        return Stage(id, request.name.trim())
+    }
+
+    @Transactional
+    fun updateStage(id: String, request: StageRequest): Stage {
+        val rows = jdbcTemplate.update(
+            "UPDATE stages SET name = :name WHERE id = :id",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", request.name.trim())
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        return Stage(id, request.name.trim())
+    }
+
+    @Transactional
+    fun createTaskType(request: TaskTypeRequest): TaskType {
+        val id = UUID.randomUUID().toString()
+        val params = MapSqlParameterSource()
+            .addValue("id", id)
+            .addValue("name", request.name.trim())
+        jdbcTemplate.update("INSERT INTO task_types(id, name) VALUES (:id, :name)", params)
+        return TaskType(id, request.name.trim())
+    }
+
+    @Transactional
+    fun updateTaskType(id: String, request: TaskTypeRequest): TaskType {
+        val rows = jdbcTemplate.update(
+            "UPDATE task_types SET name = :name WHERE id = :id",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", request.name.trim())
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        return TaskType(id, request.name.trim())
+    }
+
+    @Transactional
+    fun createWorkflow(request: WorkflowRequest): Workflow {
+        val id = UUID.randomUUID().toString()
+        jdbcTemplate.update(
+            "INSERT INTO workflows(id, name) VALUES (:id, :name)",
+            MapSqlParameterSource().addValue("id", id).addValue("name", request.name.trim())
+        )
+        saveWorkflowStages(id, request.stageIds)
+        return Workflow(id, request.name.trim(), request.stageIds)
+    }
+
+    @Transactional
+    fun updateWorkflow(id: String, request: WorkflowRequest): Workflow {
+        val rows = jdbcTemplate.update(
+            "UPDATE workflows SET name = :name WHERE id = :id",
+            MapSqlParameterSource().addValue("id", id).addValue("name", request.name.trim())
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        jdbcTemplate.update(
+            "DELETE FROM workflow_stages WHERE workflow_id = :id",
+            MapSqlParameterSource().addValue("id", id)
+        )
+        saveWorkflowStages(id, request.stageIds)
+        return Workflow(id, request.name.trim(), request.stageIds)
+    }
+
+    private fun saveWorkflowStages(workflowId: String, stageIds: List<String>) {
+        jdbcTemplate.update(
+            "DELETE FROM workflow_stages WHERE workflow_id = :id",
+            MapSqlParameterSource().addValue("id", workflowId)
+        )
+        if (stageIds.isEmpty()) return
+        val sql = """
+            INSERT INTO workflow_stages(workflow_id, stage_id, sort_order)
+            VALUES (:workflowId, :stageId, :order)
+        """
+        val batchParams = stageIds.mapIndexed { index, stageId ->
+            MapSqlParameterSource()
+                .addValue("workflowId", workflowId)
+                .addValue("stageId", stageId)
+                .addValue("order", index)
+        }.toTypedArray<SqlParameterSource>()
+        jdbcTemplate.batchUpdate(sql, batchParams)
+    }
+
+    @Transactional
+    fun createProject(request: ProjectRequest): Project {
+        val id = UUID.randomUUID().toString()
+        jdbcTemplate.update(
+            "INSERT INTO projects(id, name, workflow_id) VALUES (:id, :name, :workflowId)",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", request.name.trim())
+                .addValue("workflowId", request.workflowId)
+        )
+        return Project(id, request.name.trim(), request.workflowId)
+    }
+
+    @Transactional
+    fun updateProject(id: String, request: ProjectRequest): Project {
+        val rows = jdbcTemplate.update(
+            "UPDATE projects SET name = :name, workflow_id = :workflowId WHERE id = :id",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("name", request.name.trim())
+                .addValue("workflowId", request.workflowId)
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        return Project(id, request.name.trim(), request.workflowId)
+    }
+
+    @Transactional
+    fun createModule(request: ModuleRequest): Module {
+        val id = UUID.randomUUID().toString()
+        jdbcTemplate.update(
+            "INSERT INTO modules(id, project_id, name, workflow_id) VALUES (:id, :projectId, :name, :workflowId)",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("projectId", request.projectId)
+                .addValue("name", request.name.trim())
+                .addValue("workflowId", request.workflowId)
+        )
+        return Module(id, request.projectId, request.name.trim(), request.workflowId)
+    }
+
+    @Transactional
+    fun updateModule(id: String, request: ModuleRequest): Module {
+        val rows = jdbcTemplate.update(
+            "UPDATE modules SET project_id = :projectId, name = :name, workflow_id = :workflowId WHERE id = :id",
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("projectId", request.projectId)
+                .addValue("name", request.name.trim())
+                .addValue("workflowId", request.workflowId)
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        return Module(id, request.projectId, request.name.trim(), request.workflowId)
+    }
+
+    @Transactional
+    fun createTask(request: TaskCreateRequest): Task {
+        val id = UUID.randomUUID().toString()
+        val params = MapSqlParameterSource()
+            .addValue("id", id)
+            .addValue("moduleId", request.moduleId)
+            .addValue("stageId", request.stageId)
+            .addValue("taskTypeId", request.taskTypeId)
+            .addValue("name", request.name.trim())
+            .addValue("description", request.description?.trim().takeIf { !it.isNullOrEmpty() })
+            .addValue("priority", request.priority)
+            .addValue("status", request.status)
+            .addValue("startDate", parseDate(request.startDate))
+            .addValue("endDate", parseDate(request.endDate))
+            .addValue("parentTaskId", request.parentTaskId)
+        jdbcTemplate.update(
+            """
+                INSERT INTO tasks(id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id)
+                VALUES (:id, :moduleId, :stageId, :taskTypeId, :name, :description, :priority, :status, :startDate, :endDate, :parentTaskId)
+            """.trimIndent(),
+            params
+        )
+        return findTaskById(id)
+    }
+
+    @Transactional
+    fun updateTask(id: String, request: TaskUpdateRequest): Task {
+        val rows = jdbcTemplate.update(
+            """
+                UPDATE tasks
+                SET stage_id = :stageId,
+                    task_type_id = :taskTypeId,
+                    name = :name,
+                    description = :description,
+                    priority = :priority,
+                    status = :status,
+                    start_date = :startDate,
+                    end_date = :endDate
+                WHERE id = :id
+            """.trimIndent(),
+            MapSqlParameterSource()
+                .addValue("id", id)
+                .addValue("stageId", request.stageId)
+                .addValue("taskTypeId", request.taskTypeId)
+                .addValue("name", request.name.trim())
+                .addValue("description", request.description?.trim().takeIf { !it.isNullOrEmpty() })
+                .addValue("priority", request.priority)
+                .addValue("status", request.status)
+                .addValue("startDate", parseDate(request.startDate))
+                .addValue("endDate", parseDate(request.endDate))
+        )
+        if (rows == 0) {
+            throw EmptyResultDataAccessException(1)
+        }
+        return findTaskById(id)
+    }
+
+    private fun findTaskById(id: String): Task {
+        val sql = """
+            SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
+                   start_date, end_date, parent_task_id
+            FROM tasks
+            WHERE id = :id
+        """
+        return jdbcTemplate.queryForObject(sql, mapOf("id" to id)) { rs, _ ->
+            Task(
+                id = rs.getString("id"),
+                moduleId = rs.getString("module_id"),
+                stageId = rs.getString("stage_id"),
+                taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
+                name = rs.getString("name"),
+                description = rs.getString("description"),
+                priority = rs.getString("priority"),
+                status = rs.getString("status"),
+                startDate = rs.getString("start_date"),
+                endDate = rs.getString("end_date"),
+                parentTaskId = rs.getString("parent_task_id")
+            )
+        }
+    }
+
+    private fun parseDate(value: String?): LocalDate? {
+        if (value.isNullOrBlank()) return null
+        return try {
+            LocalDate.parse(value)
+        } catch (ex: DateTimeParseException) {
+            throw IllegalArgumentException("Invalid date format: $value", ex)
+        }
+    }
+}
