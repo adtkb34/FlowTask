@@ -13,6 +13,21 @@ export default function App() {
     { id: 'stage-review', name: '验收' }
   ]);
 
+  const [stageTasks, setStageTasks] = useState({
+    'stage-plan': [
+      { id: 'stage-plan-task-1', name: '需求确认', taskTypeId: 'type-feature' },
+      { id: 'stage-plan-task-2', name: '方案评审', taskTypeId: null }
+    ],
+    'stage-build': [{ id: 'stage-build-task-1', name: '开发排期', taskTypeId: 'type-feature' }],
+    'stage-review': []
+  });
+
+  const [stageTaskDrafts, setStageTaskDrafts] = useState({
+    'stage-plan': { name: '', taskTypeId: '' },
+    'stage-build': { name: '', taskTypeId: '' },
+    'stage-review': { name: '', taskTypeId: '' }
+  });
+
   const [taskTypes, setTaskTypes] = useState([
     { id: 'type-feature', name: '功能' },
     { id: 'type-bug', name: '缺陷修复' },
@@ -23,8 +38,7 @@ export default function App() {
     {
       id: 'workflow-default',
       name: '标准产品流程',
-      stageIds: ['stage-plan', 'stage-build', 'stage-review'],
-      taskTypeIds: ['type-feature', 'type-bug', 'type-doc']
+      stageIds: ['stage-plan', 'stage-build', 'stage-review']
     }
   ]);
 
@@ -70,8 +84,7 @@ export default function App() {
   const [taskTypeName, setTaskTypeName] = useState('');
   const [workflowForm, setWorkflowForm] = useState({
     name: '',
-    stageIds: ['stage-plan', 'stage-build'],
-    taskTypeIds: ['type-feature']
+    stageIds: ['stage-plan', 'stage-build']
   });
 
   const [projectForm, setProjectForm] = useState({
@@ -109,6 +122,8 @@ export default function App() {
     if (!stageName.trim()) return;
     const newStage = { id: `stage-${createId()}`, name: stageName.trim() };
     setStages((prev) => [...prev, newStage]);
+    setStageTasks((prev) => ({ ...prev, [newStage.id]: [] }));
+    setStageTaskDrafts((prev) => ({ ...prev, [newStage.id]: { name: '', taskTypeId: '' } }));
     setStageName('');
   };
 
@@ -126,11 +141,10 @@ export default function App() {
     const newWorkflow = {
       id: `workflow-${createId()}`,
       name: workflowForm.name.trim(),
-      stageIds: workflowForm.stageIds,
-      taskTypeIds: workflowForm.taskTypeIds
+      stageIds: workflowForm.stageIds
     };
     setWorkflows((prev) => [...prev, newWorkflow]);
-    setWorkflowForm({ name: '', stageIds: [], taskTypeIds: [] });
+    setWorkflowForm({ name: '', stageIds: [] });
   };
 
   const handleCreateProject = (event) => {
@@ -169,6 +183,53 @@ export default function App() {
     setTasks((prev) => [...prev, newTask]);
   };
 
+  const handleUpdateTask = (taskId, updates) => {
+    setTasks((prev) =>
+      prev.map((task) =>
+        task.id === taskId
+          ? {
+              ...task,
+              ...updates
+            }
+          : task
+      )
+    );
+  };
+
+  const taskTypesMap = useMemo(
+    () => new Map(taskTypes.map((taskType) => [taskType.id, taskType])),
+    [taskTypes]
+  );
+
+  const updateStageTaskDraft = (stageId, field, value) => {
+    setStageTaskDrafts((prev) => ({
+      ...prev,
+      [stageId]: {
+        ...prev[stageId],
+        [field]: value
+      }
+    }));
+  };
+
+  const handleAddStageTask = (stageId, event) => {
+    event.preventDefault();
+    const draft = stageTaskDrafts[stageId] || { name: '', taskTypeId: '' };
+    if (!draft.name.trim()) return;
+    const newStageTask = {
+      id: `stage-task-${createId()}`,
+      name: draft.name.trim(),
+      taskTypeId: draft.taskTypeId || null
+    };
+    setStageTasks((prev) => ({
+      ...prev,
+      [stageId]: [...(prev[stageId] || []), newStageTask]
+    }));
+    setStageTaskDrafts((prev) => ({
+      ...prev,
+      [stageId]: { name: '', taskTypeId: '' }
+    }));
+  };
+
   return (
     <div className="app-container">
       <h1>FlowTask 项目管理中心</h1>
@@ -186,11 +247,53 @@ export default function App() {
               <button type="submit">添加阶段</button>
             </form>
             <ul className="entity-list">
-              {stages.map((stage) => (
-                <li key={stage.id} className="entity-item">
-                  {stage.name}
-                </li>
-              ))}
+              {stages.map((stage) => {
+                const draft = stageTaskDrafts[stage.id] || { name: '', taskTypeId: '' };
+                const stageTaskList = stageTasks[stage.id] || [];
+                return (
+                  <li key={stage.id} className="entity-item">
+                    <div className="entity-item-header">
+                      <span>{stage.name}</span>
+                      <span className="entity-item-count">任务 {stageTaskList.length}</span>
+                    </div>
+                    <div className="stage-task-list">
+                      {stageTaskList.length > 0 ? (
+                        stageTaskList.map((stageTask) => (
+                          <div key={stageTask.id} className="stage-task-item">
+                            <span>{stageTask.name}</span>
+                            <span className="stage-task-type">
+                              {stageTask.taskTypeId
+                                ? taskTypesMap.get(stageTask.taskTypeId)?.name || '未指定'
+                                : '未指定类型'}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="stage-task-empty">该阶段暂未添加任务</div>
+                      )}
+                    </div>
+                    <form className="stage-task-form" onSubmit={(event) => handleAddStageTask(stage.id, event)}>
+                      <input
+                        value={draft.name}
+                        onChange={(event) => updateStageTaskDraft(stage.id, 'name', event.target.value)}
+                        placeholder="任务名称"
+                      />
+                      <select
+                        value={draft.taskTypeId}
+                        onChange={(event) => updateStageTaskDraft(stage.id, 'taskTypeId', event.target.value)}
+                      >
+                        <option value="">不指定任务类型</option>
+                        {taskTypes.map((taskType) => (
+                          <option key={taskType.id} value={taskType.id}>
+                            {taskType.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button type="submit">添加任务</button>
+                    </form>
+                  </li>
+                );
+              })}
             </ul>
           </div>
 
@@ -241,23 +344,6 @@ export default function App() {
                 </option>
               ))}
             </select>
-            <label className="section-title">选择任务类型</label>
-            <select
-              multiple
-              value={workflowForm.taskTypeIds}
-              onChange={(event) =>
-                setWorkflowForm((prev) => ({
-                  ...prev,
-                  taskTypeIds: Array.from(event.target.selectedOptions, (option) => option.value)
-                }))
-              }
-            >
-              {taskTypes.map((taskType) => (
-                <option key={taskType.id} value={taskType.id}>
-                  {taskType.name}
-                </option>
-              ))}
-            </select>
             <button type="submit">创建工作流</button>
           </form>
 
@@ -269,12 +355,6 @@ export default function App() {
                 <div className="task-meta">
                   阶段：{workflow.stageIds
                     .map((stageId) => stages.find((stage) => stage.id === stageId)?.name)
-                    .filter(Boolean)
-                    .join(' / ')}
-                </div>
-                <div className="task-meta">
-                  任务类型：{workflow.taskTypeIds
-                    .map((typeId) => taskTypes.find((type) => type.id === typeId)?.name)
                     .filter(Boolean)
                     .join(' / ')}
                 </div>
@@ -408,6 +488,7 @@ export default function App() {
             taskTypes={taskTypes}
             tasks={tasks.filter((task) => task.moduleId === selectedModule.id)}
             onAddTask={handleAddTask}
+            onUpdateTask={handleUpdateTask}
             priorities={PRIORITIES}
             statuses={STATUSES}
           />

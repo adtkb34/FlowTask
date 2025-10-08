@@ -1,135 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 
-const createDraft = ({ defaultTaskTypeId, defaultPriority, defaultStatus }) => ({
-  name: '',
-  description: '',
-  taskTypeId: defaultTaskTypeId || '',
-  priority: defaultPriority,
-  status: defaultStatus,
-  startDate: '',
-  endDate: ''
-});
-
-const TaskTree = ({
-  task,
-  tasks,
-  taskTypesMap,
-  priorities,
-  statuses,
-  workflowTaskTypes,
-  subtaskDrafts,
-  onToggleSubtask,
-  onUpdateSubtaskDraft,
-  onSubmitSubtask
-}) => {
-  const subtasks = tasks.filter((item) => item.parentTaskId === task.id);
-  const draftState = subtaskDrafts[task.id];
-  const draft = draftState?.form;
-
-  return (
-    <div className="task-card">
-      <div className="task-meta">
-        <span className="badge">{taskTypesMap.get(task.taskTypeId)?.name || '未分类'}</span>
-        <span>优先级：{task.priority}</span>
-        <span>状态：{task.status}</span>
-        {task.startDate && <span>开始：{task.startDate}</span>}
-        {task.endDate && <span>结束：{task.endDate}</span>}
-      </div>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>{task.name}</div>
-      {task.description && <div style={{ fontSize: 13, color: '#475569', marginBottom: 8 }}>{task.description}</div>}
-      <div className="task-actions">
-        <button type="button" onClick={() => onToggleSubtask(task.id)}>
-          {draftState?.open ? '关闭子任务表单' : '添加子任务'}
-        </button>
-      </div>
-
-      {draftState?.open && (
-        <form
-          className="inline-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSubmitSubtask(task.id);
-          }}
-        >
-          <input
-            value={draft?.name || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'name', event.target.value)}
-            placeholder="子任务名称"
-          />
-          <select
-            value={draft?.taskTypeId || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'taskTypeId', event.target.value)}
-          >
-            <option value="" disabled>
-              选择任务类型
-            </option>
-            {workflowTaskTypes.map((type) => (
-              <option key={type.id} value={type.id}>
-                {type.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={draft?.priority || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'priority', event.target.value)}
-          >
-            {priorities.map((priority) => (
-              <option key={priority} value={priority}>
-                {priority}
-              </option>
-            ))}
-          </select>
-          <select
-            value={draft?.status || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'status', event.target.value)}
-          >
-            {statuses.map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
-          <input
-            type="date"
-            value={draft?.startDate || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'startDate', event.target.value)}
-          />
-          <input
-            type="date"
-            value={draft?.endDate || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'endDate', event.target.value)}
-          />
-          <textarea
-            rows={2}
-            value={draft?.description || ''}
-            onChange={(event) => onUpdateSubtaskDraft(task.id, 'description', event.target.value)}
-            placeholder="子任务描述"
-          />
-          <button type="submit">保存子任务</button>
-        </form>
-      )}
-
-      {subtasks.length > 0 && (
-        <div className="subtask-container">
-          {subtasks.map((subtask) => (
-            <TaskTree
-              key={subtask.id}
-              task={subtask}
-              tasks={tasks}
-              taskTypesMap={taskTypesMap}
-              priorities={priorities}
-              statuses={statuses}
-              workflowTaskTypes={workflowTaskTypes}
-              subtaskDrafts={subtaskDrafts}
-              onToggleSubtask={onToggleSubtask}
-              onUpdateSubtaskDraft={onUpdateSubtaskDraft}
-              onSubmitSubtask={onSubmitSubtask}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
+const flattenTree = (nodes, depth = 0, accumulator = []) => {
+  nodes.forEach((node) => {
+    accumulator.push({ node, depth });
+    if (node.children.length > 0) {
+      flattenTree(node.children, depth + 1, accumulator);
+    }
+  });
+  return accumulator;
 };
 
 const ModuleView = ({
@@ -140,6 +18,7 @@ const ModuleView = ({
   taskTypes,
   tasks,
   onAddTask,
+  onUpdateTask,
   priorities,
   statuses
 }) => {
@@ -148,249 +27,399 @@ const ModuleView = ({
     () => new Map(taskTypes.map((taskType) => [taskType.id, taskType])),
     [taskTypes]
   );
+  const stageOrder = useMemo(() => [...workflow.stageIds], [workflow.stageIds]);
+  const stageOptions = useMemo(() => {
+    const orderSet = new Set(stageOrder);
+    const extras = stages
+      .filter((stage) => !orderSet.has(stage.id))
+      .map((stage) => stage.id);
+    return [...stageOrder, ...extras];
+  }, [stageOrder, stages]);
+  const defaultPriority = useMemo(
+    () => priorities[Math.floor(priorities.length / 2)] || '',
+    [priorities]
+  );
+  const defaultStatus = useMemo(() => statuses[0] || '', [statuses]);
 
-  const workflowStages = workflow.stageIds
-    .map((stageId) => stageMap.get(stageId))
-    .filter(Boolean);
-  const workflowTaskTypes = workflow.taskTypeIds
-    .map((typeId) => taskTypesMap.get(typeId))
-    .filter(Boolean);
+  const emptyForm = useMemo(
+    () => ({
+      stageId: stageOrder[0] || '',
+      name: '',
+      taskTypeId: '',
+      priority: defaultPriority,
+      status: defaultStatus,
+      startDate: '',
+      endDate: '',
+      description: ''
+    }),
+    [stageOrder, defaultPriority, defaultStatus]
+  );
 
-  const defaultTaskTypeId = workflowTaskTypes[0]?.id || '';
-  const defaultPriority = priorities[Math.floor(priorities.length / 2)] || '';
-  const defaultStatus = statuses[0] || '';
-
-  const [stageDrafts, setStageDrafts] = useState({});
-  const [subtaskDrafts, setSubtaskDrafts] = useState({});
+  const [dialogState, setDialogState] = useState({
+    open: false,
+    mode: 'create',
+    parentTaskId: null,
+    taskId: null,
+    form: emptyForm
+  });
 
   useEffect(() => {
-    setStageDrafts((prev) => {
-      const next = { ...prev };
-      workflow.stageIds.forEach((stageId) => {
-        if (!next[stageId]) {
-          next[stageId] = createDraft({
-            defaultTaskTypeId,
-            defaultPriority,
-            defaultStatus
-          });
-        }
-      });
-      Object.keys(next).forEach((stageId) => {
-        if (!workflow.stageIds.includes(stageId)) {
-          delete next[stageId];
-        }
-      });
-      return next;
+    setDialogState({
+      open: false,
+      mode: 'create',
+      parentTaskId: null,
+      taskId: null,
+      form: { ...emptyForm }
     });
-  }, [workflow.stageIds, defaultTaskTypeId, defaultPriority, defaultStatus]);
+  }, [emptyForm, module.id, workflow.id]);
 
-  useEffect(() => {
-    setSubtaskDrafts({});
-  }, [module.id, workflow.id]);
+  const stageGroups = useMemo(() => {
+    const nodes = new Map();
+    tasks.forEach((task) => {
+      nodes.set(task.id, { ...task, children: [] });
+    });
 
-  const updateStageDraft = (stageId, field, value) => {
-    setStageDrafts((prev) => ({
+    const stageIdSet = new Set(stageOrder);
+    const rootsByStage = new Map();
+    stageOrder.forEach((stageId) => {
+      rootsByStage.set(stageId, []);
+    });
+    const others = [];
+
+    tasks.forEach((task) => {
+      const node = nodes.get(task.id);
+      if (!node) return;
+      if (task.parentTaskId && nodes.has(task.parentTaskId)) {
+        nodes.get(task.parentTaskId).children.push(node);
+      } else {
+        const bucket = stageIdSet.has(task.stageId) ? rootsByStage.get(task.stageId) : others;
+        bucket.push(node);
+      }
+    });
+
+    const groups = stageOrder.map((stageId) => ({
+      stageId,
+      stage: stageMap.get(stageId),
+      rows: flattenTree(rootsByStage.get(stageId) || [])
+    }));
+
+    if (others.length > 0) {
+      groups.push({
+        stageId: 'others',
+        stage: { id: 'others', name: '其他阶段' },
+        rows: flattenTree(others)
+      });
+    }
+
+    return groups;
+  }, [tasks, stageOrder, stageMap]);
+
+  const openCreateTaskDialog = () => {
+    setDialogState({
+      open: true,
+      mode: 'create',
+      parentTaskId: null,
+      taskId: null,
+      form: { ...emptyForm }
+    });
+  };
+
+  const openCreateSubtaskDialog = (task) => {
+    setDialogState({
+      open: true,
+      mode: 'create',
+      parentTaskId: task.id,
+      taskId: null,
+      form: {
+        ...emptyForm,
+        stageId: task.stageId,
+        priority: task.priority || emptyForm.priority,
+        status: task.status || emptyForm.status
+      }
+    });
+  };
+
+  const openEditTaskDialog = (task) => {
+    setDialogState({
+      open: true,
+      mode: 'edit',
+      parentTaskId: task.parentTaskId || null,
+      taskId: task.id,
+      form: {
+        stageId: task.stageId,
+        name: task.name,
+        taskTypeId: task.taskTypeId || '',
+        priority: task.priority || defaultPriority,
+        status: task.status || defaultStatus,
+        startDate: task.startDate || '',
+        endDate: task.endDate || '',
+        description: task.description || ''
+      }
+    });
+  };
+
+  const updateDialogForm = (field, value) => {
+    setDialogState((prev) => ({
       ...prev,
-      [stageId]: {
-        ...prev[stageId],
+      form: {
+        ...prev.form,
         [field]: value
       }
     }));
   };
 
-  const handleSubmitStageTask = (stageId, event) => {
+  const closeDialog = () => {
+    setDialogState({
+      open: false,
+      mode: 'create',
+      parentTaskId: null,
+      taskId: null,
+      form: { ...emptyForm }
+    });
+  };
+
+  const handleSubmit = (event) => {
     event.preventDefault();
-    const draft = stageDrafts[stageId];
-    if (!draft || !draft.name.trim()) return;
-    const taskTypeId = draft.taskTypeId || defaultTaskTypeId;
-    if (!taskTypeId) return;
-    onAddTask({
+    if (!dialogState.form.name.trim()) return;
+    if (!dialogState.form.stageId) return;
+
+    const normalizedTaskTypeId = dialogState.form.taskTypeId ? dialogState.form.taskTypeId : null;
+    const payload = {
       moduleId: module.id,
-      stageId,
-      taskTypeId,
-      name: draft.name.trim(),
-      description: draft.description.trim(),
-      priority: draft.priority,
-      status: draft.status,
-      startDate: draft.startDate,
-      endDate: draft.endDate,
-      parentTaskId: null
-    });
-    setStageDrafts((prev) => ({
-      ...prev,
-      [stageId]: createDraft({ defaultTaskTypeId, defaultPriority, defaultStatus })
-    }));
-  };
+      stageId: dialogState.form.stageId,
+      taskTypeId: normalizedTaskTypeId,
+      name: dialogState.form.name.trim(),
+      description: dialogState.form.description.trim(),
+      priority: dialogState.form.priority,
+      status: dialogState.form.status,
+      startDate: dialogState.form.startDate,
+      endDate: dialogState.form.endDate,
+      parentTaskId: dialogState.mode === 'create' ? dialogState.parentTaskId : null
+    };
 
-  const toggleSubtask = (taskId) => {
-    setSubtaskDrafts((prev) => {
-      const next = { ...prev };
-      const current = next[taskId];
-      if (!current) {
-        next[taskId] = {
-          open: true,
-          form: createDraft({ defaultTaskTypeId, defaultPriority, defaultStatus })
-        };
-      } else {
-        next[taskId] = { ...current, open: !current.open };
-      }
-      return next;
-    });
-  };
+    if (dialogState.mode === 'create') {
+      onAddTask(payload);
+    } else if (dialogState.mode === 'edit' && dialogState.taskId) {
+      onUpdateTask(dialogState.taskId, {
+        stageId: payload.stageId,
+        taskTypeId: payload.taskTypeId,
+        name: payload.name,
+        description: payload.description,
+        priority: payload.priority,
+        status: payload.status,
+        startDate: payload.startDate,
+        endDate: payload.endDate
+      });
+    }
 
-  const updateSubtaskDraft = (taskId, field, value) => {
-    setSubtaskDrafts((prev) => {
-      const current = prev[taskId] || {
-        open: true,
-        form: createDraft({ defaultTaskTypeId, defaultPriority, defaultStatus })
-      };
-      return {
-        ...prev,
-        [taskId]: {
-          open: true,
-          form: {
-            ...current.form,
-            [field]: value
-          }
-        }
-      };
-    });
-  };
-
-  const submitSubtask = (taskId) => {
-    const draftState = subtaskDrafts[taskId];
-    const draft = draftState?.form;
-    if (!draft || !draft.name.trim()) return;
-    const parentTask = tasks.find((task) => task.id === taskId);
-    if (!parentTask) return;
-    const taskTypeId = draft.taskTypeId || defaultTaskTypeId;
-    if (!taskTypeId) return;
-    onAddTask({
-      moduleId: module.id,
-      stageId: parentTask.stageId,
-      taskTypeId,
-      name: draft.name.trim(),
-      description: draft.description.trim(),
-      priority: draft.priority,
-      status: draft.status,
-      startDate: draft.startDate,
-      endDate: draft.endDate,
-      parentTaskId: taskId
-    });
-    setSubtaskDrafts((prev) => ({
-      ...prev,
-      [taskId]: {
-        open: true,
-        form: createDraft({ defaultTaskTypeId, defaultPriority, defaultStatus })
-      }
-    }));
+    closeDialog();
   };
 
   return (
     <div>
-      <div className="task-meta" style={{ marginBottom: 8 }}>
+      <div className="task-meta" style={{ marginBottom: 12 }}>
         <span>所属项目：{project.name}</span>
         <span>模块：{module.name}</span>
         <span>工作流：{workflow.name}</span>
       </div>
-      <div className="workflow-stage-grid">
-        {workflowStages.map((stage) => {
-          const stageTasks = tasks.filter(
-            (task) => task.stageId === stage.id && task.parentTaskId === null
-          );
 
-          const draft = stageDrafts[stage.id] || createDraft({
-            defaultTaskTypeId,
-            defaultPriority,
-            defaultStatus
-          });
+      <div className="module-toolbar">
+        <button type="button" onClick={openCreateTaskDialog}>
+          新增任务
+        </button>
+      </div>
 
-          return (
-            <div key={stage.id} className="stage-column">
-              <h3>{stage.name}</h3>
-              <form className="inline-form" onSubmit={(event) => handleSubmitStageTask(stage.id, event)}>
-                <input
-                  value={draft.name}
-                  onChange={(event) => updateStageDraft(stage.id, 'name', event.target.value)}
-                  placeholder="任务名称"
-                />
-                <select
-                  value={draft.taskTypeId}
-                  onChange={(event) => updateStageDraft(stage.id, 'taskTypeId', event.target.value)}
-                >
-                  <option value="" disabled>
-                    选择任务类型
-                  </option>
-                  {workflowTaskTypes.map((type) => (
-                    <option key={type.id} value={type.id}>
-                      {type.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={draft.priority}
-                  onChange={(event) => updateStageDraft(stage.id, 'priority', event.target.value)}
-                >
-                  {priorities.map((priority) => (
-                    <option key={priority} value={priority}>
-                      {priority}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={draft.status}
-                  onChange={(event) => updateStageDraft(stage.id, 'status', event.target.value)}
-                >
-                  {statuses.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  type="date"
-                  value={draft.startDate}
-                  onChange={(event) => updateStageDraft(stage.id, 'startDate', event.target.value)}
-                />
-                <input
-                  type="date"
-                  value={draft.endDate}
-                  onChange={(event) => updateStageDraft(stage.id, 'endDate', event.target.value)}
-                />
-                <textarea
-                  rows={2}
-                  value={draft.description}
-                  onChange={(event) => updateStageDraft(stage.id, 'description', event.target.value)}
-                  placeholder="任务描述"
-                />
-                <button type="submit">保存任务</button>
-              </form>
-
-              <div style={{ marginTop: 12 }}>
-                {stageTasks.length > 0 ? (
-                  stageTasks.map((task) => (
-                    <TaskTree
-                      key={task.id}
-                      task={task}
-                      tasks={tasks}
-                      taskTypesMap={taskTypesMap}
-                      priorities={priorities}
-                      statuses={statuses}
-                      workflowTaskTypes={workflowTaskTypes}
-                      subtaskDrafts={subtaskDrafts}
-                      onToggleSubtask={toggleSubtask}
-                      onUpdateSubtaskDraft={updateSubtaskDraft}
-                      onSubmitSubtask={submitSubtask}
-                    />
+      <div className="task-table-container">
+        <table className="task-table">
+          <thead>
+            <tr>
+              <th>任务</th>
+              <th>阶段</th>
+              <th>任务类型</th>
+              <th>优先级</th>
+              <th>状态</th>
+              <th>开始日期</th>
+              <th>结束日期</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stageGroups.map((group) => (
+              <Fragment key={group.stageId}>
+                <tr className="stage-header">
+                  <td colSpan={8}>{group.stage?.name || '未命名阶段'}</td>
+                </tr>
+                {group.rows.length > 0 ? (
+                  group.rows.map(({ node, depth }) => (
+                    <tr key={node.id}>
+                      <td>
+                        <div className="task-name-cell">
+                          <div
+                            className="task-name-title"
+                            style={{ paddingLeft: depth * 16 }}
+                          >
+                            {node.name}
+                          </div>
+                          {node.description && (
+                            <div
+                              className="task-name-description"
+                              style={{ paddingLeft: depth * 16 }}
+                            >
+                              {node.description}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
+                      <td>
+                        {node.taskTypeId
+                          ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
+                          : '未指定'}
+                      </td>
+                      <td>{node.priority}</td>
+                      <td>{node.status}</td>
+                      <td>{node.startDate || '--'}</td>
+                      <td>{node.endDate || '--'}</td>
+                      <td>
+                        <div className="task-actions">
+                          <button type="button" onClick={() => openEditTaskDialog(node)}>
+                            编辑
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-action"
+                            onClick={() => openCreateSubtaskDialog(node)}
+                          >
+                            添加子任务
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
                   ))
                 ) : (
-                  <div className="empty-state">暂无任务</div>
+                  <tr className="empty-row">
+                    <td colSpan={8}>该阶段暂未创建任务</td>
+                  </tr>
                 )}
-              </div>
-            </div>
-          );
-        })}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {dialogState.open && (
+        <div className="dialog-overlay">
+          <div className="dialog">
+            <h3>
+              {dialogState.mode === 'create'
+                ? dialogState.parentTaskId
+                  ? '添加子任务'
+                  : '新增任务'
+                : '编辑任务'}
+            </h3>
+            <form onSubmit={handleSubmit} className="dialog-form">
+              <div className="dialog-grid">
+                <label className="dialog-field">
+                  <span>所属阶段</span>
+                  <select
+                    value={dialogState.form.stageId}
+                    onChange={(event) => updateDialogForm('stageId', event.target.value)}
+                    disabled={dialogState.parentTaskId !== null}
+                  >
+                    <option value="" disabled>
+                      选择阶段
+                    </option>
+                    {stageOptions.map((stageId) => (
+                      <option key={stageId} value={stageId}>
+                        {stageMap.get(stageId)?.name || '未命名阶段'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dialog-field">
+                  <span>任务名称</span>
+                  <input
+                    value={dialogState.form.name}
+                    onChange={(event) => updateDialogForm('name', event.target.value)}
+                    placeholder="请输入任务名称"
+                  />
+                </label>
+                <label className="dialog-field">
+                  <span>任务类型</span>
+                  <select
+                    value={dialogState.form.taskTypeId}
+                    onChange={(event) => updateDialogForm('taskTypeId', event.target.value)}
+                  >
+                    <option value="">不指定任务类型</option>
+                    {taskTypes.map((taskType) => (
+                      <option key={taskType.id} value={taskType.id}>
+                        {taskType.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dialog-field">
+                  <span>优先级</span>
+                  <select
+                    value={dialogState.form.priority}
+                    onChange={(event) => updateDialogForm('priority', event.target.value)}
+                  >
+                    {priorities.map((priority) => (
+                      <option key={priority} value={priority}>
+                        {priority}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dialog-field">
+                  <span>状态</span>
+                  <select
+                    value={dialogState.form.status}
+                    onChange={(event) => updateDialogForm('status', event.target.value)}
+                  >
+                    {statuses.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dialog-field">
+                  <span>开始日期</span>
+                  <input
+                    type="date"
+                    value={dialogState.form.startDate}
+                    onChange={(event) => updateDialogForm('startDate', event.target.value)}
+                  />
+                </label>
+                <label className="dialog-field">
+                  <span>结束日期</span>
+                  <input
+                    type="date"
+                    value={dialogState.form.endDate}
+                    onChange={(event) => updateDialogForm('endDate', event.target.value)}
+                  />
+                </label>
+                <label className="dialog-field dialog-field--wide">
+                  <span>任务描述</span>
+                  <textarea
+                    rows={3}
+                    value={dialogState.form.description}
+                    onChange={(event) => updateDialogForm('description', event.target.value)}
+                    placeholder="补充任务背景或交付物"
+                  />
+                </label>
+              </div>
+              <div className="dialog-footer">
+                <button type="button" className="secondary-action" onClick={closeDialog}>
+                  取消
+                </button>
+                <button type="submit">保存</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
