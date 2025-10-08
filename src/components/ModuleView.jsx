@@ -2,9 +2,10 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 
 const flattenTree = (nodes, depth = 0, accumulator = []) => {
   nodes.forEach((node) => {
-    accumulator.push({ node, depth });
-    if (node.children.length > 0) {
-      flattenTree(node.children, depth + 1, accumulator);
+    const children = Array.isArray(node.children) ? node.children : [];
+    accumulator.push({ node, depth, isTemplate: Boolean(node.isTemplate) });
+    if (children.length > 0) {
+      flattenTree(children, depth + 1, accumulator);
     }
   });
   return accumulator;
@@ -23,6 +24,28 @@ const ModuleView = ({
   statuses
 }) => {
   const stageMap = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
+  const stageTemplateMap = useMemo(() => {
+    const map = new Map();
+    stages.forEach((stage) => {
+      const templates = [...(stage.tasks || [])]
+        .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+        .map((task) => ({
+          id: task.id,
+          stageId: stage.id,
+          name: task.name,
+          taskTypeId: null,
+          priority: '',
+          status: '',
+          startDate: '',
+          endDate: '',
+          description: '',
+          children: [],
+          isTemplate: true
+        }));
+      map.set(stage.id, templates);
+    });
+    return map;
+  }, [stages]);
   const taskTypesMap = useMemo(
     () => new Map(taskTypes.map((taskType) => [taskType.id, taskType])),
     [taskTypes]
@@ -88,9 +111,10 @@ const ModuleView = ({
 
   const parentTaskOptions = useMemo(() => {
     if (!dialogState.form.stageId) return [];
+    const templateRoots = stageTemplateMap.get(dialogState.form.stageId) || [];
     const stageRoots = taskTreeByStage.get(dialogState.form.stageId) || [];
-    return flattenTree(stageRoots);
-  }, [dialogState.form.stageId, taskTreeByStage]);
+    return flattenTree([...templateRoots, ...stageRoots]);
+  }, [dialogState.form.stageId, stageTemplateMap, taskTreeByStage]);
 
   useEffect(() => {
     setDialogState({
@@ -104,13 +128,22 @@ const ModuleView = ({
 
   const stageGroups = useMemo(() => {
     const stageIdSet = new Set(stageOrder);
-    const groups = stageOrder.map((stageId) => ({
-      stageId,
-      stage: stageMap.get(stageId),
-      rows: flattenTree(taskTreeByStage.get(stageId) || [])
-    }));
+    const groups = stageOrder.map((stageId) => {
+      const templateRows = flattenTree(stageTemplateMap.get(stageId) || []);
+      const actualRows = flattenTree(taskTreeByStage.get(stageId) || []);
+      return {
+        stageId,
+        stage: stageMap.get(stageId),
+        rows: [...templateRows, ...actualRows]
+      };
+    });
 
     const otherStageRoots = [];
+    stageTemplateMap.forEach((templates, stageId) => {
+      if (!stageIdSet.has(stageId)) {
+        otherStageRoots.push(...templates);
+      }
+    });
     taskTreeByStage.forEach((roots, stageId) => {
       if (!stageIdSet.has(stageId)) {
         otherStageRoots.push(...roots);
@@ -126,7 +159,7 @@ const ModuleView = ({
     }
 
     return groups;
-  }, [stageMap, stageOrder, taskTreeByStage]);
+  }, [stageMap, stageOrder, stageTemplateMap, taskTreeByStage]);
 
   const openCreateTaskDialog = () => {
     setDialogState({
@@ -271,8 +304,8 @@ const ModuleView = ({
                 </tr>
                 {group.rows.length > 0 ? (
                   <>
-                    {group.rows.map(({ node, depth }) => (
-                      <tr key={node.id}>
+                    {group.rows.map(({ node, depth, isTemplate }) => (
+                      <tr key={node.id} className={isTemplate ? 'template-task-row' : undefined}>
                         <td>
                           <div className="task-name-cell">
                             <div
@@ -280,6 +313,7 @@ const ModuleView = ({
                               style={{ paddingLeft: depth * 16 }}
                             >
                               {node.name}
+                              {isTemplate ? <span className="task-label">（阶段模板）</span> : null}
                             </div>
                             {node.description && (
                               <div
@@ -293,27 +327,33 @@ const ModuleView = ({
                         </td>
                         <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
                         <td>
-                          {node.taskTypeId
+                          {isTemplate
+                            ? '--'
+                            : node.taskTypeId
                             ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
                             : '未指定'}
                         </td>
-                        <td>{node.priority}</td>
-                        <td>{node.status}</td>
-                        <td>{node.startDate || '--'}</td>
-                        <td>{node.endDate || '--'}</td>
+                        <td>{isTemplate ? '--' : node.priority}</td>
+                        <td>{isTemplate ? '--' : node.status}</td>
+                        <td>{isTemplate ? '--' : node.startDate || '--'}</td>
+                        <td>{isTemplate ? '--' : node.endDate || '--'}</td>
                         <td>
-                          <div className="task-actions">
-                            <button type="button" onClick={() => openEditTaskDialog(node)}>
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-action"
-                              onClick={() => openCreateSubtaskDialog(node)}
-                            >
-                              添加子任务
-                            </button>
-                          </div>
+                          {isTemplate ? (
+                            <span className="muted-text">阶段模板任务</span>
+                          ) : (
+                            <div className="task-actions">
+                              <button type="button" onClick={() => openEditTaskDialog(node)}>
+                                编辑
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary-action"
+                                onClick={() => openCreateSubtaskDialog(node)}
+                              >
+                                添加子任务
+                              </button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -371,11 +411,11 @@ const ModuleView = ({
                     disabled={dialogState.mode === 'edit'}
                   >
                     <option value="">不选择父任务</option>
-                    {parentTaskOptions.map(({ node, depth }) => {
+                    {parentTaskOptions.map(({ node, depth, isTemplate }) => {
                       const indent = depth > 0 ? `${'　'.repeat(depth)}└ ` : '';
                       return (
-                        <option key={node.id} value={node.id}>
-                          {`${indent}${node.name}`}
+                        <option key={node.id} value={node.id} disabled={isTemplate}>
+                          {`${indent}${node.name}${isTemplate ? '（阶段模板）' : ''}`}
                         </option>
                       );
                     })}
