@@ -723,6 +723,7 @@ export default function App() {
             stages={stages}
             taskTypes={taskTypes}
             tasks={tasks.filter((task) => task.moduleId === selectedModule.id)}
+            stageTemplates={stageTasks}
             onAddTask={handleAddTask}
             onUpdateTask={handleUpdateTask}
             priorities={PRIORITIES}

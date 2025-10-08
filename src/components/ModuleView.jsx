@@ -17,6 +17,7 @@ const ModuleView = ({
   stages,
   taskTypes,
   tasks,
+  stageTemplates,
   onAddTask,
   onUpdateTask,
   priorities,
@@ -28,13 +29,7 @@ const ModuleView = ({
     [taskTypes]
   );
   const stageOrder = useMemo(() => [...workflow.stageIds], [workflow.stageIds]);
-  const stageOptions = useMemo(() => {
-    const orderSet = new Set(stageOrder);
-    const extras = stages
-      .filter((stage) => !orderSet.has(stage.id))
-      .map((stage) => stage.id);
-    return [...stageOrder, ...extras];
-  }, [stageOrder, stages]);
+  const stageOptions = useMemo(() => [...stageOrder], [stageOrder]);
   const defaultPriority = useMemo(
     () => priorities[Math.floor(priorities.length / 2)] || '',
     [priorities]
@@ -63,6 +58,50 @@ const ModuleView = ({
     form: emptyForm
   });
 
+  const stageTemplateMap = useMemo(() => {
+    const map = new Map();
+    if (!stageTemplates) return map;
+    Object.entries(stageTemplates).forEach(([stageId, items]) => {
+      map.set(stageId, Array.isArray(items) ? items : []);
+    });
+    return map;
+  }, [stageTemplates]);
+
+  const taskTreeByStage = useMemo(() => {
+    const nodes = new Map();
+    tasks.forEach((task) => {
+      nodes.set(task.id, { ...task, children: [] });
+    });
+
+    const roots = new Map();
+    tasks.forEach((task) => {
+      if (!roots.has(task.stageId)) {
+        roots.set(task.stageId, []);
+      }
+    });
+
+    tasks.forEach((task) => {
+      const node = nodes.get(task.id);
+      if (!node) return;
+      if (task.parentTaskId && nodes.has(task.parentTaskId)) {
+        nodes.get(task.parentTaskId).children.push(node);
+      } else {
+        if (!roots.has(task.stageId)) {
+          roots.set(task.stageId, []);
+        }
+        roots.get(task.stageId).push(node);
+      }
+    });
+
+    return roots;
+  }, [tasks]);
+
+  const parentTaskOptions = useMemo(() => {
+    if (!dialogState.form.stageId) return [];
+    const stageRoots = taskTreeByStage.get(dialogState.form.stageId) || [];
+    return flattenTree(stageRoots);
+  }, [dialogState.form.stageId, taskTreeByStage]);
+
   useEffect(() => {
     setDialogState({
       open: false,
@@ -74,45 +113,46 @@ const ModuleView = ({
   }, [emptyForm, module.id, workflow.id]);
 
   const stageGroups = useMemo(() => {
-    const nodes = new Map();
-    tasks.forEach((task) => {
-      nodes.set(task.id, { ...task, children: [] });
-    });
-
     const stageIdSet = new Set(stageOrder);
-    const rootsByStage = new Map();
-    stageOrder.forEach((stageId) => {
-      rootsByStage.set(stageId, []);
-    });
-    const others = [];
-
-    tasks.forEach((task) => {
-      const node = nodes.get(task.id);
-      if (!node) return;
-      if (task.parentTaskId && nodes.has(task.parentTaskId)) {
-        nodes.get(task.parentTaskId).children.push(node);
-      } else {
-        const bucket = stageIdSet.has(task.stageId) ? rootsByStage.get(task.stageId) : others;
-        bucket.push(node);
-      }
-    });
-
     const groups = stageOrder.map((stageId) => ({
       stageId,
       stage: stageMap.get(stageId),
-      rows: flattenTree(rootsByStage.get(stageId) || [])
+      rows: flattenTree(taskTreeByStage.get(stageId) || []),
+      templateRows: (stageTemplateMap.get(stageId) || []).map((template) => ({
+        node: {
+          id: `stage-template-${template.id}`,
+          name: template.name,
+          stageId,
+          taskTypeId: template.taskTypeId || null,
+          description: '',
+          priority: null,
+          status: null,
+          startDate: '',
+          endDate: '',
+          isTemplate: true
+        },
+        depth: 0
+      }))
     }));
 
-    if (others.length > 0) {
+    const otherStageRoots = [];
+    taskTreeByStage.forEach((roots, stageId) => {
+      if (!stageIdSet.has(stageId)) {
+        otherStageRoots.push(...roots);
+      }
+    });
+
+    if (otherStageRoots.length > 0) {
       groups.push({
         stageId: 'others',
         stage: { id: 'others', name: '其他阶段' },
-        rows: flattenTree(others)
+        rows: flattenTree(otherStageRoots),
+        templateRows: []
       });
     }
 
     return groups;
-  }, [tasks, stageOrder, stageMap]);
+  }, [stageMap, stageOrder, stageTemplateMap, taskTreeByStage]);
 
   const openCreateTaskDialog = () => {
     setDialogState({
@@ -159,13 +199,19 @@ const ModuleView = ({
   };
 
   const updateDialogForm = (field, value) => {
-    setDialogState((prev) => ({
-      ...prev,
-      form: {
-        ...prev.form,
-        [field]: value
+    setDialogState((prev) => {
+      const next = {
+        ...prev,
+        form: {
+          ...prev.form,
+          [field]: value
+        }
+      };
+      if (field === 'stageId') {
+        next.parentTaskId = null;
       }
-    }));
+      return next;
+    });
   };
 
   const closeDialog = () => {
@@ -249,53 +295,78 @@ const ModuleView = ({
                 <tr className="stage-header">
                   <td colSpan={8}>{group.stage?.name || '未命名阶段'}</td>
                 </tr>
-                {group.rows.length > 0 ? (
-                  group.rows.map(({ node, depth }) => (
-                    <tr key={node.id}>
-                      <td>
-                        <div className="task-name-cell">
-                          <div
-                            className="task-name-title"
-                            style={{ paddingLeft: depth * 16 }}
-                          >
-                            {node.name}
-                          </div>
-                          {node.description && (
+                {group.rows.length > 0 || group.templateRows.length > 0 ? (
+                  <>
+                    {group.rows.map(({ node, depth }) => (
+                      <tr key={node.id}>
+                        <td>
+                          <div className="task-name-cell">
                             <div
-                              className="task-name-description"
+                              className="task-name-title"
                               style={{ paddingLeft: depth * 16 }}
                             >
-                              {node.description}
+                              {node.name}
                             </div>
-                          )}
-                        </div>
-                      </td>
-                      <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
-                      <td>
-                        {node.taskTypeId
-                          ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
-                          : '未指定'}
-                      </td>
-                      <td>{node.priority}</td>
-                      <td>{node.status}</td>
-                      <td>{node.startDate || '--'}</td>
-                      <td>{node.endDate || '--'}</td>
-                      <td>
-                        <div className="task-actions">
-                          <button type="button" onClick={() => openEditTaskDialog(node)}>
-                            编辑
-                          </button>
-                          <button
-                            type="button"
-                            className="secondary-action"
-                            onClick={() => openCreateSubtaskDialog(node)}
-                          >
-                            添加子任务
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                            {node.description && (
+                              <div
+                                className="task-name-description"
+                                style={{ paddingLeft: depth * 16 }}
+                              >
+                                {node.description}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
+                        <td>
+                          {node.taskTypeId
+                            ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
+                            : '未指定'}
+                        </td>
+                        <td>{node.priority}</td>
+                        <td>{node.status}</td>
+                        <td>{node.startDate || '--'}</td>
+                        <td>{node.endDate || '--'}</td>
+                        <td>
+                          <div className="task-actions">
+                            <button type="button" onClick={() => openEditTaskDialog(node)}>
+                              编辑
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-action"
+                              onClick={() => openCreateSubtaskDialog(node)}
+                            >
+                              添加子任务
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {group.templateRows.map(({ node }) => (
+                      <tr key={node.id} className="template-row">
+                        <td>
+                          <div className="task-name-cell">
+                            <div className="task-name-title">{node.name}</div>
+                            <div className="task-template-hint">来源：阶段默认任务</div>
+                          </div>
+                        </td>
+                        <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
+                        <td>
+                          {node.taskTypeId
+                            ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
+                            : '未指定'}
+                        </td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>--</td>
+                        <td>
+                          <span className="template-tag">阶段任务</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </>
                 ) : (
                   <tr className="empty-row">
                     <td colSpan={8}>该阶段暂未创建任务</td>
@@ -334,6 +405,29 @@ const ModuleView = ({
                         {stageMap.get(stageId)?.name || '未命名阶段'}
                       </option>
                     ))}
+                  </select>
+                </label>
+                <label className="dialog-field">
+                  <span>父任务（可选）</span>
+                  <select
+                    value={dialogState.parentTaskId || ''}
+                    onChange={(event) =>
+                      setDialogState((prev) => ({
+                        ...prev,
+                        parentTaskId: event.target.value ? event.target.value : null
+                      }))
+                    }
+                    disabled={dialogState.mode === 'edit'}
+                  >
+                    <option value="">不选择父任务</option>
+                    {parentTaskOptions.map(({ node, depth }) => {
+                      const indent = depth > 0 ? `${'　'.repeat(depth)}└ ` : '';
+                      return (
+                        <option key={node.id} value={node.id}>
+                          {`${indent}${node.name}`}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
                 <label className="dialog-field">
