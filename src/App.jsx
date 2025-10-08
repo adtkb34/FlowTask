@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import ModuleView from './components/ModuleView.jsx';
+import Modal from './components/Modal.jsx';
 
 const PRIORITIES = ['低', '中', '高'];
 const STATUSES = ['未开始', '进行中', '已完成'];
@@ -20,12 +21,6 @@ export default function App() {
     ],
     'stage-build': [{ id: 'stage-build-task-1', name: '开发排期', taskTypeId: 'type-feature' }],
     'stage-review': []
-  });
-
-  const [stageTaskDrafts, setStageTaskDrafts] = useState({
-    'stage-plan': { name: '', taskTypeId: '' },
-    'stage-build': { name: '', taskTypeId: '' },
-    'stage-review': { name: '', taskTypeId: '' }
   });
 
   const [taskTypes, setTaskTypes] = useState([
@@ -80,19 +75,41 @@ export default function App() {
     }
   ]);
 
-  const [stageName, setStageName] = useState('');
-  const [taskTypeName, setTaskTypeName] = useState('');
-  const [workflowForm, setWorkflowForm] = useState({
+  const [stageModalState, setStageModalState] = useState({
+    open: false,
+    mode: 'create',
+    stageId: null
+  });
+  const [stageModalData, setStageModalData] = useState({ name: '', tasks: [] });
+  const [stageModalTaskDraft, setStageModalTaskDraft] = useState({
+    id: null,
+    name: '',
+    taskTypeId: ''
+  });
+  const [taskTypeModalState, setTaskTypeModalState] = useState({
+    open: false,
+    mode: 'create',
+    taskTypeId: null,
+    name: ''
+  });
+  const [workflowModalState, setWorkflowModalState] = useState({
+    open: false,
+    mode: 'create',
+    workflowId: null,
     name: '',
     stageIds: ['stage-plan', 'stage-build']
   });
-
-  const [projectForm, setProjectForm] = useState({
+  const [projectModalState, setProjectModalState] = useState({
+    open: false,
+    mode: 'create',
+    projectId: null,
     name: '',
     workflowId: 'workflow-default'
   });
-
-  const [moduleForm, setModuleForm] = useState({
+  const [moduleModalState, setModuleModalState] = useState({
+    open: false,
+    mode: 'create',
+    moduleId: null,
     projectId: 'project-alpha',
     name: '',
     workflowId: 'workflow-default'
@@ -117,62 +134,302 @@ export default function App() {
     return workflows.find((workflow) => workflow.id === workflowId) || null;
   }, [selectedModule, selectedProject, workflows]);
 
-  const handleCreateStage = (event) => {
-    event.preventDefault();
-    if (!stageName.trim()) return;
-    const newStage = { id: `stage-${createId()}`, name: stageName.trim() };
-    setStages((prev) => [...prev, newStage]);
-    setStageTasks((prev) => ({ ...prev, [newStage.id]: [] }));
-    setStageTaskDrafts((prev) => ({ ...prev, [newStage.id]: { name: '', taskTypeId: '' } }));
-    setStageName('');
+  const resetStageModalTaskDraft = () => {
+    setStageModalTaskDraft({ id: null, name: '', taskTypeId: '' });
   };
 
-  const handleCreateTaskType = (event) => {
-    event.preventDefault();
-    if (!taskTypeName.trim()) return;
-    const newTaskType = { id: `type-${createId()}`, name: taskTypeName.trim() };
-    setTaskTypes((prev) => [...prev, newTaskType]);
-    setTaskTypeName('');
+  const closeStageModal = () => {
+    setStageModalState({ open: false, mode: 'create', stageId: null });
+    setStageModalData({ name: '', tasks: [] });
+    resetStageModalTaskDraft();
   };
 
-  const handleCreateWorkflow = (event) => {
-    event.preventDefault();
-    if (!workflowForm.name.trim() || workflowForm.stageIds.length === 0) return;
-    const newWorkflow = {
-      id: `workflow-${createId()}`,
-      name: workflowForm.name.trim(),
-      stageIds: workflowForm.stageIds
-    };
-    setWorkflows((prev) => [...prev, newWorkflow]);
-    setWorkflowForm({ name: '', stageIds: [] });
+  const openCreateStageModal = () => {
+    setStageModalState({ open: true, mode: 'create', stageId: null });
+    setStageModalData({ name: '', tasks: [] });
+    resetStageModalTaskDraft();
   };
 
-  const handleCreateProject = (event) => {
-    event.preventDefault();
-    if (!projectForm.name.trim() || !projectForm.workflowId) return;
-    const newProject = {
-      id: `project-${createId()}`,
-      name: projectForm.name.trim(),
-      workflowId: projectForm.workflowId
-    };
-    setProjects((prev) => [...prev, newProject]);
-    setProjectForm({ name: '', workflowId: projectForm.workflowId });
-    setSelectedProjectId(newProject.id);
+  const openEditStageModal = (stageId) => {
+    const targetStage = stages.find((stage) => stage.id === stageId);
+    setStageModalState({ open: true, mode: 'edit', stageId });
+    setStageModalData({
+      name: targetStage?.name || '',
+      tasks: [...(stageTasks[stageId] || [])]
+    });
+    resetStageModalTaskDraft();
   };
 
-  const handleCreateModule = (event) => {
+  const handleStageTaskDraftSubmit = (event) => {
     event.preventDefault();
-    if (!moduleForm.name.trim() || !moduleForm.projectId) return;
-    const newModule = {
-      id: `module-${createId()}`,
-      projectId: moduleForm.projectId,
-      name: moduleForm.name.trim(),
-      workflowId: moduleForm.workflowId || null
-    };
-    setModules((prev) => [...prev, newModule]);
-    setModuleForm({ ...moduleForm, name: '' });
-    setSelectedProjectId(newModule.projectId);
-    setSelectedModuleId(newModule.id);
+    const trimmedName = stageModalTaskDraft.name.trim();
+    if (!trimmedName) return;
+    setStageModalData((prev) => {
+      if (stageModalTaskDraft.id) {
+        return {
+          ...prev,
+          tasks: prev.tasks.map((task) =>
+            task.id === stageModalTaskDraft.id
+              ? { ...task, name: trimmedName, taskTypeId: stageModalTaskDraft.taskTypeId || null }
+              : task
+          )
+        };
+      }
+      const newTask = {
+        id: `stage-task-${createId()}`,
+        name: trimmedName,
+        taskTypeId: stageModalTaskDraft.taskTypeId || null
+      };
+      return { ...prev, tasks: [...prev.tasks, newTask] };
+    });
+    resetStageModalTaskDraft();
+  };
+
+  const handleRemoveStageTask = (taskId) => {
+    setStageModalData((prev) => ({
+      ...prev,
+      tasks: prev.tasks.filter((task) => task.id !== taskId)
+    }));
+    setStageModalTaskDraft((draft) => (draft.id === taskId ? { id: null, name: '', taskTypeId: '' } : draft));
+  };
+
+  const handleSaveStageModal = () => {
+    const trimmedName = stageModalData.name.trim();
+    if (!trimmedName) return;
+
+    if (stageModalState.mode === 'create') {
+      const newStageId = `stage-${createId()}`;
+      const newStage = { id: newStageId, name: trimmedName };
+      setStages((prev) => [...prev, newStage]);
+      setStageTasks((prev) => ({
+        ...prev,
+        [newStageId]: stageModalData.tasks.map((task) => ({
+          ...task,
+          id: task.id || `stage-task-${createId()}`,
+          taskTypeId: task.taskTypeId || null
+        }))
+      }));
+    } else if (stageModalState.stageId) {
+      const { stageId } = stageModalState;
+      setStages((prev) =>
+        prev.map((stage) => (stage.id === stageId ? { ...stage, name: trimmedName } : stage))
+      );
+      setStageTasks((prev) => ({
+        ...prev,
+        [stageId]: stageModalData.tasks.map((task) => ({
+          ...task,
+          id: task.id || `stage-task-${createId()}`,
+          taskTypeId: task.taskTypeId || null
+        }))
+      }));
+    }
+
+    closeStageModal();
+  };
+
+  const closeTaskTypeModal = () => {
+    setTaskTypeModalState({ open: false, mode: 'create', taskTypeId: null, name: '' });
+  };
+
+  const openCreateTaskTypeModal = () => {
+    setTaskTypeModalState({ open: true, mode: 'create', taskTypeId: null, name: '' });
+  };
+
+  const openEditTaskTypeModal = (taskTypeId) => {
+    const target = taskTypes.find((taskType) => taskType.id === taskTypeId);
+    setTaskTypeModalState({
+      open: true,
+      mode: 'edit',
+      taskTypeId,
+      name: target?.name || ''
+    });
+  };
+
+  const handleSaveTaskTypeModal = () => {
+    const trimmedName = taskTypeModalState.name.trim();
+    if (!trimmedName) return;
+    if (taskTypeModalState.mode === 'create') {
+      const newTaskType = { id: `type-${createId()}`, name: trimmedName };
+      setTaskTypes((prev) => [...prev, newTaskType]);
+    } else if (taskTypeModalState.taskTypeId) {
+      setTaskTypes((prev) =>
+        prev.map((taskType) =>
+          taskType.id === taskTypeModalState.taskTypeId ? { ...taskType, name: trimmedName } : taskType
+        )
+      );
+    }
+    closeTaskTypeModal();
+  };
+
+  const closeWorkflowModal = () => {
+    setWorkflowModalState({ open: false, mode: 'create', workflowId: null, name: '', stageIds: [] });
+  };
+
+  const openCreateWorkflowModal = () => {
+    setWorkflowModalState({
+      open: true,
+      mode: 'create',
+      workflowId: null,
+      name: '',
+      stageIds: stages.map((stage) => stage.id).slice(0, 2)
+    });
+  };
+
+  const openEditWorkflowModal = (workflowId) => {
+    const workflow = workflows.find((item) => item.id === workflowId);
+    setWorkflowModalState({
+      open: true,
+      mode: 'edit',
+      workflowId,
+      name: workflow?.name || '',
+      stageIds: workflow?.stageIds || []
+    });
+  };
+
+  const handleSaveWorkflowModal = () => {
+    const trimmedName = workflowModalState.name.trim();
+    if (!trimmedName || workflowModalState.stageIds.length === 0) return;
+
+    if (workflowModalState.mode === 'create') {
+      const newWorkflow = {
+        id: `workflow-${createId()}`,
+        name: trimmedName,
+        stageIds: workflowModalState.stageIds
+      };
+      setWorkflows((prev) => [...prev, newWorkflow]);
+    } else if (workflowModalState.workflowId) {
+      setWorkflows((prev) =>
+        prev.map((workflow) =>
+          workflow.id === workflowModalState.workflowId
+            ? { ...workflow, name: trimmedName, stageIds: workflowModalState.stageIds }
+            : workflow
+        )
+      );
+    }
+    closeWorkflowModal();
+  };
+
+  const closeProjectModal = () => {
+    setProjectModalState({
+      open: false,
+      mode: 'create',
+      projectId: null,
+      name: '',
+      workflowId: workflows[0]?.id || ''
+    });
+  };
+
+  const openCreateProjectModal = () => {
+    setProjectModalState({
+      open: true,
+      mode: 'create',
+      projectId: null,
+      name: '',
+      workflowId: workflows[0]?.id || ''
+    });
+  };
+
+  const openEditProjectModal = (projectId) => {
+    const project = projects.find((item) => item.id === projectId);
+    setProjectModalState({
+      open: true,
+      mode: 'edit',
+      projectId,
+      name: project?.name || '',
+      workflowId: project?.workflowId || workflows[0]?.id || ''
+    });
+  };
+
+  const handleSaveProjectModal = () => {
+    const trimmedName = projectModalState.name.trim();
+    if (!trimmedName || !projectModalState.workflowId) return;
+
+    if (projectModalState.mode === 'create') {
+      const newProject = {
+        id: `project-${createId()}`,
+        name: trimmedName,
+        workflowId: projectModalState.workflowId
+      };
+      setProjects((prev) => [...prev, newProject]);
+      setSelectedProjectId(newProject.id);
+    } else if (projectModalState.projectId) {
+      setProjects((prev) =>
+        prev.map((project) =>
+          project.id === projectModalState.projectId
+            ? { ...project, name: trimmedName, workflowId: projectModalState.workflowId }
+            : project
+        )
+      );
+    }
+    closeProjectModal();
+  };
+
+  const closeModuleModal = () => {
+    setModuleModalState({
+      open: false,
+      mode: 'create',
+      moduleId: null,
+      projectId: projects[0]?.id || '',
+      name: '',
+      workflowId: workflows[0]?.id || ''
+    });
+  };
+
+  const openCreateModuleModal = () => {
+    setModuleModalState({
+      open: true,
+      mode: 'create',
+      moduleId: null,
+      projectId: selectedProjectId || projects[0]?.id || '',
+      name: '',
+      workflowId: workflows[0]?.id || ''
+    });
+  };
+
+  const openEditModuleModal = (moduleId) => {
+    const module = modules.find((item) => item.id === moduleId);
+    setModuleModalState({
+      open: true,
+      mode: 'edit',
+      moduleId,
+      projectId: module?.projectId || selectedProjectId || projects[0]?.id || '',
+      name: module?.name || '',
+      workflowId: module?.workflowId || ''
+    });
+  };
+
+  const handleSaveModuleModal = () => {
+    const trimmedName = moduleModalState.name.trim();
+    if (!trimmedName || !moduleModalState.projectId) return;
+
+    if (moduleModalState.mode === 'create') {
+      const newModule = {
+        id: `module-${createId()}`,
+        projectId: moduleModalState.projectId,
+        name: trimmedName,
+        workflowId: moduleModalState.workflowId || null
+      };
+      setModules((prev) => [...prev, newModule]);
+      setSelectedProjectId(newModule.projectId);
+      setSelectedModuleId(newModule.id);
+    } else if (moduleModalState.moduleId) {
+      const updatedModule = {
+        projectId: moduleModalState.projectId,
+        name: trimmedName,
+        workflowId: moduleModalState.workflowId || null
+      };
+      setModules((prev) =>
+        prev.map((module) =>
+          module.id === moduleModalState.moduleId
+            ? { ...module, ...updatedModule }
+            : module
+        )
+      );
+      if (selectedModuleId === moduleModalState.moduleId) {
+        setSelectedProjectId(moduleModalState.projectId);
+      }
+    }
+    closeModuleModal();
   };
 
   const handleAddTask = (taskPayload) => {
@@ -201,246 +458,225 @@ export default function App() {
     [taskTypes]
   );
 
-  const updateStageTaskDraft = (stageId, field, value) => {
-    setStageTaskDrafts((prev) => ({
-      ...prev,
-      [stageId]: {
-        ...prev[stageId],
-        [field]: value
-      }
-    }));
-  };
-
-  const handleAddStageTask = (stageId, event) => {
-    event.preventDefault();
-    const draft = stageTaskDrafts[stageId] || { name: '', taskTypeId: '' };
-    if (!draft.name.trim()) return;
-    const newStageTask = {
-      id: `stage-task-${createId()}`,
-      name: draft.name.trim(),
-      taskTypeId: draft.taskTypeId || null
-    };
-    setStageTasks((prev) => ({
-      ...prev,
-      [stageId]: [...(prev[stageId] || []), newStageTask]
-    }));
-    setStageTaskDrafts((prev) => ({
-      ...prev,
-      [stageId]: { name: '', taskTypeId: '' }
-    }));
-  };
-
   return (
     <div className="app-container">
       <h1>FlowTask 项目管理中心</h1>
       <div className="grid-layout">
         <div className="card">
-          <h2>基础配置</h2>
-          <div>
-            <div className="section-title">创建阶段</div>
-            <form onSubmit={handleCreateStage}>
-              <input
-                value={stageName}
-                onChange={(event) => setStageName(event.target.value)}
-                placeholder="阶段名称"
-              />
-              <button type="submit">添加阶段</button>
-            </form>
-            <ul className="entity-list">
-              {stages.map((stage) => {
-                const draft = stageTaskDrafts[stage.id] || { name: '', taskTypeId: '' };
-                const stageTaskList = stageTasks[stage.id] || [];
-                return (
-                  <li key={stage.id} className="entity-item">
-                    <div className="entity-item-header">
-                      <span>{stage.name}</span>
-                      <span className="entity-item-count">任务 {stageTaskList.length}</span>
-                    </div>
-                    <div className="stage-task-list">
-                      {stageTaskList.length > 0 ? (
-                        stageTaskList.map((stageTask) => (
-                          <div key={stageTask.id} className="stage-task-item">
-                            <span>{stageTask.name}</span>
-                            <span className="stage-task-type">
-                              {stageTask.taskTypeId
-                                ? taskTypesMap.get(stageTask.taskTypeId)?.name || '未指定'
-                                : '未指定类型'}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="stage-task-empty">该阶段暂未添加任务</div>
-                      )}
-                    </div>
-                    <form className="stage-task-form" onSubmit={(event) => handleAddStageTask(stage.id, event)}>
-                      <input
-                        value={draft.name}
-                        onChange={(event) => updateStageTaskDraft(stage.id, 'name', event.target.value)}
-                        placeholder="任务名称"
-                      />
-                      <select
-                        value={draft.taskTypeId}
-                        onChange={(event) => updateStageTaskDraft(stage.id, 'taskTypeId', event.target.value)}
-                      >
-                        <option value="">不指定任务类型</option>
-                        {taskTypes.map((taskType) => (
-                          <option key={taskType.id} value={taskType.id}>
-                            {taskType.name}
-                          </option>
-                        ))}
-                      </select>
-                      <button type="submit">添加任务</button>
-                    </form>
-                  </li>
-                );
-              })}
-            </ul>
+          <div className="card-header">
+            <h2>基础配置</h2>
+            <button type="button" onClick={openCreateStageModal}>
+              新建阶段
+            </button>
+          </div>
+          <div className="section-title">阶段列表</div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>阶段名称</th>
+                  <th>关联任务数</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stages.map((stage) => {
+                  const stageTaskList = stageTasks[stage.id] || [];
+                  return (
+                    <tr key={stage.id}>
+                      <td>{stage.name}</td>
+                      <td>{stageTaskList.length}</td>
+                      <td className="table-actions">
+                        <button type="button" onClick={() => openEditStageModal(stage.id)}>
+                          编辑
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {stages.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="empty-cell">
+                      暂无阶段，请先创建。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
 
-          <div>
-            <div className="section-title">创建任务类型</div>
-            <form onSubmit={handleCreateTaskType}>
-              <input
-                value={taskTypeName}
-                onChange={(event) => setTaskTypeName(event.target.value)}
-                placeholder="任务类型名称"
-              />
-              <button type="submit">添加任务类型</button>
-            </form>
-            <ul className="entity-list">
-              {taskTypes.map((taskType) => (
-                <li key={taskType.id} className="entity-item">
-                  {taskType.name}
-                </li>
-              ))}
-            </ul>
+          <div className="section-header">
+            <div className="section-title">任务类型</div>
+            <button type="button" onClick={openCreateTaskTypeModal}>
+              新建任务类型
+            </button>
+          </div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>类型名称</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {taskTypes.map((taskType) => (
+                  <tr key={taskType.id}>
+                    <td>{taskType.name}</td>
+                    <td className="table-actions">
+                      <button type="button" onClick={() => openEditTaskTypeModal(taskType.id)}>
+                        编辑
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {taskTypes.length === 0 ? (
+                  <tr>
+                    <td colSpan={2} className="empty-cell">
+                      暂无任务类型。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         </div>
 
         <div className="card">
-          <h2>工作流管理</h2>
-          <form onSubmit={handleCreateWorkflow}>
-            <input
-              value={workflowForm.name}
-              onChange={(event) =>
-                setWorkflowForm((prev) => ({ ...prev, name: event.target.value }))
-              }
-              placeholder="工作流名称"
-            />
-            <label className="section-title">选择阶段</label>
-            <select
-              multiple
-              value={workflowForm.stageIds}
-              onChange={(event) =>
-                setWorkflowForm((prev) => ({
-                  ...prev,
-                  stageIds: Array.from(event.target.selectedOptions, (option) => option.value)
-                }))
-              }
-            >
-              {stages.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.name}
-                </option>
-              ))}
-            </select>
-            <button type="submit">创建工作流</button>
-          </form>
-
-          <div className="section-title">现有工作流</div>
-          <ul className="entity-list">
-            {workflows.map((workflow) => (
-              <li key={workflow.id} className="entity-item">
-                <div>{workflow.name}</div>
-                <div className="task-meta">
-                  阶段：{workflow.stageIds
-                    .map((stageId) => stages.find((stage) => stage.id === stageId)?.name)
-                    .filter(Boolean)
-                    .join(' / ')}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="card-header">
+            <h2>工作流管理</h2>
+            <button type="button" onClick={openCreateWorkflowModal}>
+              新建工作流
+            </button>
+          </div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>工作流名称</th>
+                  <th>包含阶段</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workflows.map((workflow) => (
+                  <tr key={workflow.id}>
+                    <td>{workflow.name}</td>
+                    <td>
+                      {workflow.stageIds
+                        .map((stageId) => stages.find((stage) => stage.id === stageId)?.name)
+                        .filter(Boolean)
+                        .join(' / ') || '未关联阶段'}
+                    </td>
+                    <td className="table-actions">
+                      <button type="button" onClick={() => openEditWorkflowModal(workflow.id)}>
+                        编辑
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {workflows.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="empty-cell">
+                      暂无工作流。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card">
-          <h2>项目与模块</h2>
-          <div className="section-title">创建项目</div>
-          <form onSubmit={handleCreateProject}>
-            <input
-              value={projectForm.name}
-              onChange={(event) => setProjectForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="项目名称"
-            />
-            <select
-              value={projectForm.workflowId}
-              onChange={(event) =>
-                setProjectForm((prev) => ({ ...prev, workflowId: event.target.value }))
-              }
-            >
-              {workflows.map((workflow) => (
-                <option key={workflow.id} value={workflow.id}>
-                  {workflow.name}
-                </option>
-              ))}
-            </select>
-            <button type="submit">创建项目</button>
-          </form>
+          <div className="card-header">
+            <h2>项目与模块</h2>
+          </div>
+          <div className="section-header">
+            <div className="section-title">项目</div>
+            <button type="button" onClick={openCreateProjectModal}>
+              新建项目
+            </button>
+          </div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>项目名称</th>
+                  <th>关联工作流</th>
+                  <th>包含模块</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map((project) => {
+                  const relatedModules = modules.filter((module) => module.projectId === project.id);
+                  return (
+                    <tr key={project.id}>
+                      <td>{project.name}</td>
+                      <td>{workflows.find((workflow) => workflow.id === project.workflowId)?.name || '未设置'}</td>
+                      <td>{relatedModules.map((module) => module.name).join(' / ') || '暂无模块'}</td>
+                      <td className="table-actions">
+                        <button type="button" onClick={() => openEditProjectModal(project.id)}>
+                          编辑
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {projects.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">
+                      暂无项目。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
 
-          <div className="section-title">创建模块</div>
-          <form onSubmit={handleCreateModule}>
-            <select
-              value={moduleForm.projectId}
-              onChange={(event) => setModuleForm((prev) => ({ ...prev, projectId: event.target.value }))}
-            >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-            <input
-              value={moduleForm.name}
-              onChange={(event) => setModuleForm((prev) => ({ ...prev, name: event.target.value }))}
-              placeholder="模块名称"
-            />
-            <select
-              value={moduleForm.workflowId || ''}
-              onChange={(event) =>
-                setModuleForm((prev) => ({
-                  ...prev,
-                  workflowId: event.target.value === '' ? null : event.target.value
-                }))
-              }
-            >
-              <option value="">使用项目默认工作流</option>
-              {workflows.map((workflow) => (
-                <option key={workflow.id} value={workflow.id}>
-                  {workflow.name}
-                </option>
-              ))}
-            </select>
-            <button type="submit">创建模块</button>
-          </form>
-
-          <div className="section-title">当前项目</div>
-          <ul className="entity-list">
-            {projects.map((project) => (
-              <li key={project.id} className="entity-item">
-                <div>{project.name}</div>
-                <div className="task-meta">
-                  工作流：{workflows.find((workflow) => workflow.id === project.workflowId)?.name || '未设置'}
-                </div>
-                <div className="task-meta">
-                  模块：
-                  {modules
-                    .filter((module) => module.projectId === project.id)
-                    .map((module) => module.name)
-                    .join(' / ') || '暂无'}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="section-header">
+            <div className="section-title">模块</div>
+            <button type="button" onClick={openCreateModuleModal}>
+              新建模块
+            </button>
+          </div>
+          <div className="table-wrapper">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>模块名称</th>
+                  <th>所属项目</th>
+                  <th>使用工作流</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {modules.map((module) => (
+                  <tr key={module.id}>
+                    <td>{module.name}</td>
+                    <td>{projects.find((project) => project.id === module.projectId)?.name || '未关联项目'}</td>
+                    <td>
+                      {module.workflowId
+                        ? workflows.find((workflow) => workflow.id === module.workflowId)?.name || '未设置'
+                        : '使用项目默认工作流'}
+                    </td>
+                    <td className="table-actions">
+                      <button type="button" onClick={() => openEditModuleModal(module.id)}>
+                        编辑
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {modules.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="empty-cell">
+                      暂无模块。
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 
@@ -496,6 +732,305 @@ export default function App() {
           <div className="empty-state">请选择模块查看任务看板。</div>
         )}
       </div>
+
+      <Modal
+        isOpen={stageModalState.open}
+        title={stageModalState.mode === 'create' ? '新建阶段' : '编辑阶段'}
+        onClose={closeStageModal}
+        footer={
+          <>
+            <button type="button" className="secondary" onClick={closeStageModal}>
+              取消
+            </button>
+            <button type="button" onClick={handleSaveStageModal}>
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="form-item">
+          <label>阶段名称</label>
+          <input
+            value={stageModalData.name}
+            onChange={(event) =>
+              setStageModalData((prev) => ({ ...prev, name: event.target.value }))
+            }
+            placeholder="请输入阶段名称"
+          />
+        </div>
+
+        <div className="form-item">
+          <label>阶段任务</label>
+          <form className="stage-task-modal-form" onSubmit={handleStageTaskDraftSubmit}>
+            <input
+              value={stageModalTaskDraft.name}
+              onChange={(event) =>
+                setStageModalTaskDraft((prev) => ({ ...prev, name: event.target.value }))
+              }
+              placeholder="任务名称"
+            />
+            <select
+              value={stageModalTaskDraft.taskTypeId}
+              onChange={(event) =>
+                setStageModalTaskDraft((prev) => ({ ...prev, taskTypeId: event.target.value }))
+              }
+            >
+              <option value="">不指定任务类型</option>
+              {taskTypes.map((taskType) => (
+                <option key={taskType.id} value={taskType.id}>
+                  {taskType.name}
+                </option>
+              ))}
+            </select>
+            <button type="submit">
+              {stageModalTaskDraft.id ? '更新任务' : '添加任务'}
+            </button>
+            {stageModalTaskDraft.id ? (
+              <button
+                type="button"
+                className="secondary"
+                onClick={resetStageModalTaskDraft}
+              >
+                取消编辑
+              </button>
+            ) : null}
+          </form>
+        </div>
+
+        <div className="table-wrapper">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>任务名称</th>
+                <th>类型</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stageModalData.tasks.map((task) => (
+                <tr key={task.id}>
+                  <td>{task.name}</td>
+                  <td>{task.taskTypeId ? taskTypesMap.get(task.taskTypeId)?.name || '未指定' : '未指定'}</td>
+                  <td className="table-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStageModalTaskDraft({
+                          id: task.id,
+                          name: task.name,
+                          taskTypeId: task.taskTypeId || ''
+                        })
+                      }
+                    >
+                      编辑
+                    </button>
+                    <button type="button" className="danger" onClick={() => handleRemoveStageTask(task.id)}>
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {stageModalData.tasks.length === 0 ? (
+                <tr>
+                  <td colSpan={3} className="empty-cell">
+                    暂无任务。
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={taskTypeModalState.open}
+        title={taskTypeModalState.mode === 'create' ? '新建任务类型' : '编辑任务类型'}
+        onClose={closeTaskTypeModal}
+        footer={
+          <>
+            <button type="button" className="secondary" onClick={closeTaskTypeModal}>
+              取消
+            </button>
+            <button type="button" onClick={handleSaveTaskTypeModal}>
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="form-item">
+          <label>类型名称</label>
+          <input
+            value={taskTypeModalState.name}
+            onChange={(event) =>
+              setTaskTypeModalState((prev) => ({ ...prev, name: event.target.value }))
+            }
+            placeholder="请输入任务类型名称"
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={workflowModalState.open}
+        title={workflowModalState.mode === 'create' ? '新建工作流' : '编辑工作流'}
+        onClose={closeWorkflowModal}
+        footer={
+          <>
+            <button type="button" className="secondary" onClick={closeWorkflowModal}>
+              取消
+            </button>
+            <button type="button" onClick={handleSaveWorkflowModal}>
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="form-item">
+          <label>工作流名称</label>
+          <input
+            value={workflowModalState.name}
+            onChange={(event) =>
+              setWorkflowModalState((prev) => ({ ...prev, name: event.target.value }))
+            }
+            placeholder="请输入工作流名称"
+          />
+        </div>
+        <div className="form-item">
+          <label>选择阶段</label>
+          <div className="checkbox-group">
+            {stages.map((stage) => {
+              const checked = workflowModalState.stageIds.includes(stage.id);
+              return (
+                <label key={stage.id} className="checkbox-item">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => {
+                      const { checked } = event.target;
+                      setWorkflowModalState((prev) => ({
+                        ...prev,
+                        stageIds: checked
+                          ? [...prev.stageIds, stage.id]
+                          : prev.stageIds.filter((id) => id !== stage.id)
+                      }));
+                    }}
+                  />
+                  {stage.name}
+                </label>
+              );
+            })}
+            {stages.length === 0 ? <div className="empty-inline">暂无阶段可选。</div> : null}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={projectModalState.open}
+        title={projectModalState.mode === 'create' ? '新建项目' : '编辑项目'}
+        onClose={closeProjectModal}
+        footer={
+          <>
+            <button type="button" className="secondary" onClick={closeProjectModal}>
+              取消
+            </button>
+            <button type="button" onClick={handleSaveProjectModal}>
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="form-item">
+          <label>项目名称</label>
+          <input
+            value={projectModalState.name}
+            onChange={(event) =>
+              setProjectModalState((prev) => ({ ...prev, name: event.target.value }))
+            }
+            placeholder="请输入项目名称"
+          />
+        </div>
+        <div className="form-item">
+          <label>关联工作流</label>
+          <select
+            value={projectModalState.workflowId}
+            onChange={(event) =>
+              setProjectModalState((prev) => ({ ...prev, workflowId: event.target.value }))
+            }
+          >
+            <option value="" disabled>
+              请选择工作流
+            </option>
+            {workflows.map((workflow) => (
+              <option key={workflow.id} value={workflow.id}>
+                {workflow.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={moduleModalState.open}
+        title={moduleModalState.mode === 'create' ? '新建模块' : '编辑模块'}
+        onClose={closeModuleModal}
+        footer={
+          <>
+            <button type="button" className="secondary" onClick={closeModuleModal}>
+              取消
+            </button>
+            <button type="button" onClick={handleSaveModuleModal}>
+              保存
+            </button>
+          </>
+        }
+      >
+        <div className="form-item">
+          <label>模块名称</label>
+          <input
+            value={moduleModalState.name}
+            onChange={(event) =>
+              setModuleModalState((prev) => ({ ...prev, name: event.target.value }))
+            }
+            placeholder="请输入模块名称"
+          />
+        </div>
+        <div className="form-item">
+          <label>所属项目</label>
+          <select
+            value={moduleModalState.projectId}
+            onChange={(event) =>
+              setModuleModalState((prev) => ({ ...prev, projectId: event.target.value }))
+            }
+          >
+            <option value="" disabled>
+              请选择项目
+            </option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-item">
+          <label>关联工作流</label>
+          <select
+            value={moduleModalState.workflowId || ''}
+            onChange={(event) =>
+              setModuleModalState((prev) => ({
+                ...prev,
+                workflowId: event.target.value === '' ? '' : event.target.value
+              }))
+            }
+          >
+            <option value="">使用项目默认工作流</option>
+            {workflows.map((workflow) => (
+              <option key={workflow.id} value={workflow.id}>
+                {workflow.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </Modal>
     </div>
   );
 }
