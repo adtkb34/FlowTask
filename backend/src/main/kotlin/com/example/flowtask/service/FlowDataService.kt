@@ -348,7 +348,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 endDate = rs.getString("end_date"),
                 parentTaskId = rs.getString("parent_task_id")
             )
-        }
+        } ?: throw EmptyResultDataAccessException(1)
     }
 
     private fun parseDate(value: String?): LocalDate? {
