@@ -46,7 +46,8 @@ export default function App() {
     open: false,
     mode: 'create',
     stageId: null,
-    name: ''
+    name: '',
+    tasks: ['']
   });
   const [taskTypeModalState, setTaskTypeModalState] = useState({
     open: false,
@@ -162,12 +163,19 @@ export default function App() {
     return workflows.find((workflow) => workflow.id === workflowId) || null;
   }, [selectedModule, selectedProject, workflows]);
 
+  const modulesForSelectedProject = useMemo(() => {
+    if (!selectedProjectId) {
+      return modules;
+    }
+    return modules.filter((module) => module.projectId === selectedProjectId);
+  }, [modules, selectedProjectId]);
+
   const closeStageModal = () => {
-    setStageModalState({ open: false, mode: 'create', stageId: null, name: '' });
+    setStageModalState({ open: false, mode: 'create', stageId: null, name: '', tasks: [''] });
   };
 
   const openCreateStageModal = () => {
-    setStageModalState({ open: true, mode: 'create', stageId: null, name: '' });
+    setStageModalState({ open: true, mode: 'create', stageId: null, name: '', tasks: [''] });
   };
 
   const openEditStageModal = (stageId) => {
@@ -176,23 +184,64 @@ export default function App() {
       open: true,
       mode: 'edit',
       stageId,
-      name: targetStage?.name || ''
+      name: targetStage?.name || '',
+      tasks: targetStage?.tasks?.map((task) => task.name) || ['']
     });
+  };
+
+  const addStageTaskField = () => {
+    setStageModalState((prev) => ({ ...prev, tasks: [...prev.tasks, ''] }));
+  };
+
+  const updateStageTaskValue = (index, value) => {
+    setStageModalState((prev) => {
+      const nextTasks = [...prev.tasks];
+      nextTasks[index] = value;
+      return { ...prev, tasks: nextTasks };
+    });
+  };
+
+  const removeStageTaskField = (index) => {
+    setStageModalState((prev) => {
+      const nextTasks = prev.tasks.filter((_, taskIndex) => taskIndex !== index);
+      return { ...prev, tasks: nextTasks.length > 0 ? nextTasks : [''] };
+    });
+  };
+
+  const handleProjectSelectionChange = (event) => {
+    const nextProjectId = event.target.value;
+    setSelectedProjectId(nextProjectId);
+    const projectModules = modules.filter((module) => module.projectId === nextProjectId);
+    const nextModuleId = projectModules.some((module) => module.id === selectedModuleId)
+      ? selectedModuleId
+      : projectModules[0]?.id || '';
+    setSelectedModuleId(nextModuleId);
+  };
+
+  const handleModuleSelectionChange = (event) => {
+    setSelectedModuleId(event.target.value);
   };
 
   const handleSaveStageModal = async () => {
     const trimmedName = stageModalState.name.trim();
     if (!trimmedName) return;
+    const normalizedTasks = stageModalState.tasks
+      .map((taskName) => taskName.trim())
+      .filter((taskName) => taskName.length > 0);
+    const payload = {
+      name: trimmedName,
+      tasks: normalizedTasks.map((taskName) => ({ name: taskName }))
+    };
     try {
       if (stageModalState.mode === 'create') {
         await requestJson('/api/stages', {
           method: 'POST',
-          body: JSON.stringify({ name: trimmedName })
+          body: JSON.stringify(payload)
         });
       } else if (stageModalState.stageId) {
         await requestJson(`/api/stages/${stageModalState.stageId}`, {
           method: 'PUT',
-          body: JSON.stringify({ name: trimmedName })
+          body: JSON.stringify(payload)
         });
       }
       await loadData();
@@ -462,6 +511,7 @@ export default function App() {
                   <thead>
                     <tr>
                       <th>阶段名称</th>
+                      <th>阶段任务</th>
                       <th>操作</th>
                     </tr>
                   </thead>
@@ -469,6 +519,17 @@ export default function App() {
                     {stages.map((stage) => (
                       <tr key={stage.id}>
                         <td>{stage.name}</td>
+                        <td>
+                          {stage.tasks && stage.tasks.length > 0 ? (
+                            <ul className="stage-task-list">
+                              {stage.tasks.map((task) => (
+                                <li key={task.id}>{task.name}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <span className="muted-text">暂无任务</span>
+                          )}
+                        </td>
                         <td className="table-actions">
                           <button type="button" onClick={() => openEditStageModal(stage.id)} disabled={loading}>
                             编辑
@@ -478,7 +539,7 @@ export default function App() {
                     ))}
                     {stages.length === 0 ? (
                       <tr>
-                        <td colSpan={2} className="empty-cell">
+                        <td colSpan={3} className="empty-cell">
                           暂无阶段。
                         </td>
                       </tr>
@@ -673,6 +734,42 @@ export default function App() {
           </div>
 
           <div className="content">
+            <div className="selection-toolbar">
+              <label>
+                <span>项目</span>
+                <select
+                  value={selectedProjectId || ''}
+                  onChange={handleProjectSelectionChange}
+                  disabled={projects.length === 0}
+                >
+                  <option value="" disabled>
+                    请选择项目
+                  </option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>模块</span>
+                <select
+                  value={selectedModuleId || ''}
+                  onChange={handleModuleSelectionChange}
+                  disabled={modulesForSelectedProject.length === 0}
+                >
+                  <option value="" disabled>
+                    请选择模块
+                  </option>
+                  {modulesForSelectedProject.map((module) => (
+                    <option key={module.id} value={module.id}>
+                      {module.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             {loading && tasks.length === 0 ? (
               <div className="empty-panel">正在加载数据...</div>
             ) : null}
@@ -719,6 +816,31 @@ export default function App() {
             onChange={(event) => setStageModalState((prev) => ({ ...prev, name: event.target.value }))}
             placeholder="请输入阶段名称"
           />
+        </label>
+        <label className="form-field">
+          <span>阶段任务（可选）</span>
+          <div className="stage-task-editor">
+            {stageModalState.tasks.map((taskName, index) => (
+              <div key={`stage-task-${index}`} className="stage-task-row">
+                <input
+                  value={taskName}
+                  onChange={(event) => updateStageTaskValue(index, event.target.value)}
+                  placeholder="请输入任务名称"
+                />
+                <button
+                  type="button"
+                  className="stage-task-remove-button"
+                  onClick={() => removeStageTaskField(index)}
+                >
+                  删除
+                </button>
+              </div>
+            ))}
+            <button type="button" className="link-button stage-task-add-button" onClick={addStageTaskField}>
+              + 添加任务
+            </button>
+            <div className="muted-text">将自动忽略为空的任务名称。</div>
+          </div>
         </label>
       </Modal>
 

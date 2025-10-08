@@ -2,7 +2,15 @@ package com.example.flowtask.api
 
 data class Stage(
     val id: String,
-    val name: String
+    val name: String,
+    val tasks: List<StageTask> = emptyList()
+)
+
+data class StageTask(
+    val id: String,
+    val stageId: String,
+    val name: String,
+    val sortOrder: Int
 )
 
 data class TaskType(
@@ -53,6 +61,11 @@ data class FlowDataResponse(
 )
 
 data class StageRequest(
+    val name: String,
+    val tasks: List<StageTaskRequest> = emptyList()
+)
+
+data class StageTaskRequest(
     val name: String
 )
 
