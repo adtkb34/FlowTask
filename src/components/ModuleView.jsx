@@ -3,7 +3,9 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 const flattenTree = (nodes, depth = 0, accumulator = []) => {
   nodes.forEach((node) => {
     const children = Array.isArray(node.children) ? node.children : [];
-    accumulator.push({ node, depth, isTemplate: Boolean(node.isTemplate) });
+    const nodeKind = typeof node.nodeKind === 'string' ? node.nodeKind : node.isTemplate ? 'template-task' : 'task';
+    const isTemplate = nodeKind.startsWith('template');
+    accumulator.push({ node, depth, isTemplate, nodeKind });
     if (children.length > 0) {
       flattenTree(children, depth + 1, accumulator);
     }
@@ -24,13 +26,53 @@ const ModuleView = ({
   statuses
 }) => {
   const stageMap = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
+  const { stageRoots: taskTreeByStage, stageTaskChildren } = useMemo(() => {
+    const nodes = new Map();
+    tasks.forEach((task) => {
+      nodes.set(task.id, { ...task, children: [], nodeKind: 'task' });
+    });
+
+    tasks.forEach((task) => {
+      if (task.parentTaskId && nodes.has(task.parentTaskId) && nodes.has(task.id)) {
+        nodes.get(task.parentTaskId).children.push(nodes.get(task.id));
+      }
+    });
+
+    const stageRoots = new Map();
+    const stageTaskChildrenMap = new Map();
+
+    tasks.forEach((task) => {
+      const node = nodes.get(task.id);
+      if (!node) return;
+
+      if (task.parentTaskId && nodes.has(task.parentTaskId)) {
+        return;
+      }
+
+      if (task.parentStageTaskId) {
+        if (!stageTaskChildrenMap.has(task.parentStageTaskId)) {
+          stageTaskChildrenMap.set(task.parentStageTaskId, []);
+        }
+        stageTaskChildrenMap.get(task.parentStageTaskId).push(node);
+        return;
+      }
+
+      if (!stageRoots.has(task.stageId)) {
+        stageRoots.set(task.stageId, []);
+      }
+      stageRoots.get(task.stageId).push(node);
+    });
+
+    return { stageRoots, stageTaskChildren: stageTaskChildrenMap };
+  }, [tasks]);
+
   const stageTemplateMap = useMemo(() => {
     const map = new Map();
     stages.forEach((stage) => {
       const templates = [...(stage.tasks || [])]
         .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
         .map((task) => {
-          const children = [...(task.subtasks || [])]
+          const templateSubtasks = [...(task.subtasks || [])]
             .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
             .map((subtask) => ({
               id: subtask.id,
@@ -43,8 +85,10 @@ const ModuleView = ({
               endDate: '',
               description: '',
               children: [],
-              isTemplate: true
+              isTemplate: true,
+              nodeKind: 'template-subtask'
             }));
+          const actualChildren = stageTaskChildren.get(task.id) || [];
           return {
             id: task.id,
             stageId: stage.id,
@@ -55,14 +99,15 @@ const ModuleView = ({
             startDate: '',
             endDate: '',
             description: '',
-            children,
-            isTemplate: true
+            children: [...templateSubtasks, ...actualChildren],
+            isTemplate: true,
+            nodeKind: 'template-task'
           };
         });
       map.set(stage.id, templates);
     });
     return map;
-  }, [stages]);
+  }, [stageTaskChildren, stages]);
   const taskTypesMap = useMemo(
     () => new Map(taskTypes.map((taskType) => [taskType.id, taskType])),
     [taskTypes]
@@ -93,38 +138,10 @@ const ModuleView = ({
     open: false,
     mode: 'create',
     parentTaskId: null,
+    parentStageTaskId: null,
     taskId: null,
     form: emptyForm
   });
-
-  const taskTreeByStage = useMemo(() => {
-    const nodes = new Map();
-    tasks.forEach((task) => {
-      nodes.set(task.id, { ...task, children: [] });
-    });
-
-    const roots = new Map();
-    tasks.forEach((task) => {
-      if (!roots.has(task.stageId)) {
-        roots.set(task.stageId, []);
-      }
-    });
-
-    tasks.forEach((task) => {
-      const node = nodes.get(task.id);
-      if (!node) return;
-      if (task.parentTaskId && nodes.has(task.parentTaskId)) {
-        nodes.get(task.parentTaskId).children.push(node);
-      } else {
-        if (!roots.has(task.stageId)) {
-          roots.set(task.stageId, []);
-        }
-        roots.get(task.stageId).push(node);
-      }
-    });
-
-    return roots;
-  }, [tasks]);
 
   const parentTaskOptions = useMemo(() => {
     if (!dialogState.form.stageId) return [];
@@ -138,6 +155,7 @@ const ModuleView = ({
       open: false,
       mode: 'create',
       parentTaskId: null,
+      parentStageTaskId: null,
       taskId: null,
       form: { ...emptyForm }
     });
@@ -183,6 +201,7 @@ const ModuleView = ({
       open: true,
       mode: 'create',
       parentTaskId: null,
+      parentStageTaskId: null,
       taskId: null,
       form: { ...emptyForm }
     });
@@ -193,6 +212,7 @@ const ModuleView = ({
       open: true,
       mode: 'create',
       parentTaskId: task.id,
+      parentStageTaskId: null,
       taskId: null,
       form: {
         ...emptyForm,
@@ -208,6 +228,7 @@ const ModuleView = ({
       open: true,
       mode: 'edit',
       parentTaskId: task.parentTaskId || null,
+      parentStageTaskId: task.parentStageTaskId || null,
       taskId: task.id,
       form: {
         stageId: task.stageId,
@@ -233,6 +254,7 @@ const ModuleView = ({
       };
       if (field === 'stageId') {
         next.parentTaskId = null;
+        next.parentStageTaskId = null;
       }
       return next;
     });
@@ -243,6 +265,7 @@ const ModuleView = ({
       open: false,
       mode: 'create',
       parentTaskId: null,
+      parentStageTaskId: null,
       taskId: null,
       form: { ...emptyForm }
     });
@@ -264,7 +287,9 @@ const ModuleView = ({
       status: dialogState.form.status,
       startDate: dialogState.form.startDate,
       endDate: dialogState.form.endDate,
-      parentTaskId: dialogState.mode === 'create' ? dialogState.parentTaskId : null
+      parentTaskId: dialogState.mode === 'create' ? dialogState.parentTaskId : null,
+      parentStageTaskId:
+        dialogState.mode === 'create' ? dialogState.parentStageTaskId : null
     };
 
     if (dialogState.mode === 'create') {
@@ -284,6 +309,29 @@ const ModuleView = ({
 
     closeDialog();
   };
+
+  const handleParentSelectionChange = (event) => {
+    const { value } = event.target;
+    setDialogState((prev) => {
+      if (!value) {
+        return { ...prev, parentTaskId: null, parentStageTaskId: null };
+      }
+      const [type, id] = value.split(':');
+      if (type === 'task') {
+        return { ...prev, parentTaskId: id, parentStageTaskId: null };
+      }
+      if (type === 'template-task') {
+        return { ...prev, parentTaskId: null, parentStageTaskId: id };
+      }
+      return prev;
+    });
+  };
+
+  const parentSelectionValue = dialogState.parentTaskId
+    ? `task:${dialogState.parentTaskId}`
+    : dialogState.parentStageTaskId
+    ? `template-task:${dialogState.parentStageTaskId}`
+    : '';
 
   return (
     <div>
@@ -391,7 +439,7 @@ const ModuleView = ({
           <div className="dialog">
             <h3>
               {dialogState.mode === 'create'
-                ? dialogState.parentTaskId
+                ? dialogState.parentTaskId || dialogState.parentStageTaskId
                   ? '添加子任务'
                   : '新增任务'
                 : '编辑任务'}
@@ -403,7 +451,7 @@ const ModuleView = ({
                   <select
                     value={dialogState.form.stageId}
                     onChange={(event) => updateDialogForm('stageId', event.target.value)}
-                    disabled={dialogState.parentTaskId !== null}
+                    disabled={dialogState.parentTaskId !== null || dialogState.parentStageTaskId !== null}
                   >
                     <option value="" disabled>
                       选择阶段
@@ -418,20 +466,25 @@ const ModuleView = ({
                 <label className="dialog-field">
                   <span>父任务（可选）</span>
                   <select
-                    value={dialogState.parentTaskId || ''}
-                    onChange={(event) =>
-                      setDialogState((prev) => ({
-                        ...prev,
-                        parentTaskId: event.target.value ? event.target.value : null
-                      }))
-                    }
+                    value={parentSelectionValue}
+                    onChange={handleParentSelectionChange}
                     disabled={dialogState.mode === 'edit'}
                   >
                     <option value="">不选择父任务</option>
-                    {parentTaskOptions.map(({ node, depth, isTemplate }) => {
+                    {parentTaskOptions.map(({ node, depth, isTemplate, nodeKind }) => {
                       const indent = depth > 0 ? `${'　'.repeat(depth)}└ ` : '';
+                      const optionValue =
+                        nodeKind === 'task'
+                          ? `task:${node.id}`
+                          : nodeKind === 'template-task'
+                          ? `template-task:${node.id}`
+                          : `template-subtask:${node.id}`;
                       return (
-                        <option key={node.id} value={node.id} disabled={isTemplate}>
+                        <option
+                          key={`${nodeKind}:${node.id}`}
+                          value={optionValue}
+                          disabled={nodeKind === 'template-subtask'}
+                        >
                           {`${indent}${node.name}${isTemplate ? '（阶段模板）' : ''}`}
                         </option>
                       );

@@ -144,7 +144,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
     fun getTasks(): List<Task> {
         val sql = """
             SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
-                   start_date, end_date, parent_task_id
+                   start_date, end_date, parent_task_id, parent_stage_task_id
             FROM tasks
             ORDER BY created_at, name
         """
@@ -160,7 +160,8 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 status = rs.getString("status"),
                 startDate = rs.getString("start_date"),
                 endDate = rs.getString("end_date"),
-                parentTaskId = rs.getString("parent_task_id")
+                parentTaskId = rs.getString("parent_task_id"),
+                parentStageTaskId = rs.getString("parent_stage_task_id")
             )
         }
     }
@@ -402,6 +403,23 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
 
     @Transactional
     fun createTask(request: TaskCreateRequest): Task {
+        if (request.parentTaskId != null && request.parentStageTaskId != null) {
+            throw IllegalArgumentException("Task cannot have both parent task and parent stage task")
+        }
+
+        request.parentStageTaskId?.let { parentStageTaskId ->
+            val parentStageId = jdbcTemplate.query(
+                "SELECT stage_id FROM stage_tasks WHERE id = :id",
+                mapOf("id" to parentStageTaskId)
+            ) { rs, _ ->
+                rs.getString("stage_id")
+            }.firstOrNull() ?: throw IllegalArgumentException("Parent stage task not found")
+
+            if (parentStageId != request.stageId) {
+                throw IllegalArgumentException("Parent stage task belongs to a different stage")
+            }
+        }
+
         val id = UUID.randomUUID().toString()
         val params = MapSqlParameterSource()
             .addValue("id", id)
@@ -415,10 +433,11 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             .addValue("startDate", parseDate(request.startDate))
             .addValue("endDate", parseDate(request.endDate))
             .addValue("parentTaskId", request.parentTaskId)
+            .addValue("parentStageTaskId", request.parentStageTaskId)
         jdbcTemplate.update(
             """
-                INSERT INTO tasks(id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id)
-                VALUES (:id, :moduleId, :stageId, :taskTypeId, :name, :description, :priority, :status, :startDate, :endDate, :parentTaskId)
+                INSERT INTO tasks(id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id, parent_stage_task_id)
+                VALUES (:id, :moduleId, :stageId, :taskTypeId, :name, :description, :priority, :status, :startDate, :endDate, :parentTaskId, :parentStageTaskId)
             """.trimIndent(),
             params
         )
@@ -460,7 +479,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
     private fun findTaskById(id: String): Task {
         val sql = """
             SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
-                   start_date, end_date, parent_task_id
+                   start_date, end_date, parent_task_id, parent_stage_task_id
             FROM tasks
             WHERE id = :id
         """
@@ -476,7 +495,8 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 status = rs.getString("status"),
                 startDate = rs.getString("start_date"),
                 endDate = rs.getString("end_date"),
-                parentTaskId = rs.getString("parent_task_id")
+                parentTaskId = rs.getString("parent_task_id"),
+                parentStageTaskId = rs.getString("parent_stage_task_id")
             )
         } ?: throw EmptyResultDataAccessException(1)
     }

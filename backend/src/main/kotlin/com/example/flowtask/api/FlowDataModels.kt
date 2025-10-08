@@ -56,7 +56,8 @@ data class Task(
     val status: String,
     val startDate: String?,
     val endDate: String?,
-    val parentTaskId: String?
+    val parentTaskId: String?,
+    val parentStageTaskId: String?
 )
 
 data class FlowDataResponse(
@@ -112,7 +113,8 @@ data class TaskCreateRequest(
     val status: String,
     val startDate: String?,
     val endDate: String?,
-    val parentTaskId: String?
+    val parentTaskId: String?,
+    val parentStageTaskId: String?
 )
 
 data class TaskUpdateRequest(
