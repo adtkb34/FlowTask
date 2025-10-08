@@ -26,11 +26,34 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
 
     fun getStages(): List<Stage> {
         val sql = "SELECT id, name FROM stages ORDER BY created_at, name"
-        return jdbcTemplate.query(sql) { rs, _ ->
+        val stages = jdbcTemplate.query(sql) { rs, _ ->
             Stage(
                 id = rs.getString("id"),
-                name = rs.getString("name")
+                name = rs.getString("name"),
+                tasks = emptyList()
             )
+        }
+        if (stages.isEmpty()) {
+            return stages
+        }
+        val stageIds = stages.map { it.id }
+        val tasksSql = """
+            SELECT id, stage_id, name, sort_order
+            FROM stage_tasks
+            WHERE stage_id IN (:stageIds)
+            ORDER BY stage_id, sort_order, created_at
+        """
+        val tasks = jdbcTemplate.query(tasksSql, mapOf("stageIds" to stageIds)) { rs, _ ->
+            StageTask(
+                id = rs.getString("id"),
+                stageId = rs.getString("stage_id"),
+                name = rs.getString("name"),
+                sortOrder = rs.getInt("sort_order")
+            )
+        }.groupBy(StageTask::stageId)
+
+        return stages.map { stage ->
+            stage.copy(tasks = tasks[stage.id] ?: emptyList())
         }
     }
 
@@ -124,7 +147,8 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             .addValue("id", id)
             .addValue("name", request.name.trim())
         jdbcTemplate.update("INSERT INTO stages(id, name) VALUES (:id, :name)", params)
-        return Stage(id, request.name.trim())
+        val tasks = saveStageTasks(id, request.tasks)
+        return Stage(id, request.name.trim(), tasks)
     }
 
     @Transactional
@@ -138,7 +162,8 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         if (rows == 0) {
             throw EmptyResultDataAccessException(1)
         }
-        return Stage(id, request.name.trim())
+        val tasks = saveStageTasks(id, request.tasks)
+        return Stage(id, request.name.trim(), tasks)
     }
 
     @Transactional
@@ -210,6 +235,47 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 .addValue("order", index)
         }.toTypedArray<SqlParameterSource>()
         jdbcTemplate.batchUpdate(sql, batchParams)
+    }
+
+    private fun saveStageTasks(stageId: String, taskRequests: List<StageTaskRequest>): List<StageTask> {
+        jdbcTemplate.update(
+            "DELETE FROM stage_tasks WHERE stage_id = :stageId",
+            MapSqlParameterSource().addValue("stageId", stageId)
+        )
+
+        val normalizedNames = taskRequests.mapNotNull { request ->
+            val trimmed = request.name.trim()
+            trimmed.takeIf { it.isNotEmpty() }
+        }
+
+        if (normalizedNames.isEmpty()) {
+            return emptyList()
+        }
+
+        val tasks = normalizedNames.mapIndexed { index, name ->
+            StageTask(
+                id = UUID.randomUUID().toString(),
+                stageId = stageId,
+                name = name,
+                sortOrder = index
+            )
+        }
+
+        val sql = """
+            INSERT INTO stage_tasks(id, stage_id, name, sort_order)
+            VALUES (:id, :stageId, :name, :sortOrder)
+        """.trimIndent()
+        val params = tasks.map {
+            MapSqlParameterSource()
+                .addValue("id", it.id)
+                .addValue("stageId", it.stageId)
+                .addValue("name", it.name)
+                .addValue("sortOrder", it.sortOrder)
+        }.toTypedArray<SqlParameterSource>()
+
+        jdbcTemplate.batchUpdate(sql, params)
+
+        return tasks
     }
 
     @Transactional
