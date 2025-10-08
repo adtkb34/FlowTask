@@ -121,6 +121,9 @@ class FlowDataController(private val flowDataService: FlowDataService) {
     @PostMapping("/tasks")
     fun createTask(@RequestBody request: TaskCreateRequest): Task {
         validateTaskPayload(request.moduleId, request.stageId, request.name, request.priority, request.status)
+        if (request.parentTaskId != null && request.parentStageTaskId != null) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
+        }
         return flowDataService.createTask(request)
     }
 
