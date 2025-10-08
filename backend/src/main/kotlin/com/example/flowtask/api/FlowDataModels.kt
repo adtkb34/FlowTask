@@ -10,6 +10,14 @@ data class StageTask(
     val id: String,
     val stageId: String,
     val name: String,
+    val sortOrder: Int,
+    val subtasks: List<StageSubtask> = emptyList()
+)
+
+data class StageSubtask(
+    val id: String,
+    val stageTaskId: String,
+    val name: String,
     val sortOrder: Int
 )
 
@@ -66,6 +74,11 @@ data class StageRequest(
 )
 
 data class StageTaskRequest(
+    val name: String,
+    val subtasks: List<StageSubtaskRequest> = emptyList()
+)
+
+data class StageSubtaskRequest(
     val name: String
 )
 

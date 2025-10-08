@@ -43,17 +43,42 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             WHERE stage_id IN (:stageIds)
             ORDER BY stage_id, sort_order, created_at
         """
-        val tasks = jdbcTemplate.query(tasksSql, mapOf("stageIds" to stageIds)) { rs, _ ->
+        val stageTasks = jdbcTemplate.query(tasksSql, mapOf("stageIds" to stageIds)) { rs, _ ->
             StageTask(
                 id = rs.getString("id"),
                 stageId = rs.getString("stage_id"),
                 name = rs.getString("name"),
-                sortOrder = rs.getInt("sort_order")
+                sortOrder = rs.getInt("sort_order"),
+                subtasks = emptyList()
             )
-        }.groupBy(StageTask::stageId)
+        }
+
+        val tasksWithSubtasks = if (stageTasks.isEmpty()) {
+            emptyMap<String, List<StageTask>>()
+        } else {
+            val taskIds = stageTasks.map(StageTask::id)
+            val subtasksSql = """
+                SELECT id, stage_task_id, name, sort_order
+                FROM stage_task_subtasks
+                WHERE stage_task_id IN (:taskIds)
+                ORDER BY stage_task_id, sort_order, created_at
+            """
+            val subtasks = jdbcTemplate.query(subtasksSql, mapOf("taskIds" to taskIds)) { rs, _ ->
+                StageSubtask(
+                    id = rs.getString("id"),
+                    stageTaskId = rs.getString("stage_task_id"),
+                    name = rs.getString("name"),
+                    sortOrder = rs.getInt("sort_order")
+                )
+            }.groupBy(StageSubtask::stageTaskId)
+
+            stageTasks
+                .map { task -> task.copy(subtasks = subtasks[task.id] ?: emptyList()) }
+                .groupBy(StageTask::stageId)
+        }
 
         return stages.map { stage ->
-            stage.copy(tasks = tasks[stage.id] ?: emptyList())
+            stage.copy(tasks = tasksWithSubtasks[stage.id] ?: emptyList())
         }
     }
 
@@ -243,21 +268,40 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             MapSqlParameterSource().addValue("stageId", stageId)
         )
 
-        val normalizedNames = taskRequests.mapNotNull { request ->
-            val trimmed = request.name.trim()
-            trimmed.takeIf { it.isNotEmpty() }
+        data class NormalizedStageTask(val name: String, val subtasks: List<String>)
+
+        val normalizedTasks = taskRequests.mapNotNull { request ->
+            val trimmedName = request.name.trim()
+            if (trimmedName.isEmpty()) {
+                return@mapNotNull null
+            }
+            val normalizedSubtasks = request.subtasks.mapNotNull { subtaskRequest ->
+                val trimmedSubtaskName = subtaskRequest.name.trim()
+                trimmedSubtaskName.takeIf { it.isNotEmpty() }
+            }
+            NormalizedStageTask(trimmedName, normalizedSubtasks)
         }
 
-        if (normalizedNames.isEmpty()) {
+        if (normalizedTasks.isEmpty()) {
             return emptyList()
         }
 
-        val tasks = normalizedNames.mapIndexed { index, name ->
+        val tasks = normalizedTasks.mapIndexed { index, normalized ->
+            val taskId = UUID.randomUUID().toString()
+            val subtasks = normalized.subtasks.mapIndexed { subIndex, subtaskName ->
+                StageSubtask(
+                    id = UUID.randomUUID().toString(),
+                    stageTaskId = taskId,
+                    name = subtaskName,
+                    sortOrder = subIndex
+                )
+            }
             StageTask(
-                id = UUID.randomUUID().toString(),
+                id = taskId,
                 stageId = stageId,
-                name = name,
-                sortOrder = index
+                name = normalized.name,
+                sortOrder = index,
+                subtasks = subtasks
             )
         }
 
@@ -274,6 +318,26 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         }.toTypedArray<SqlParameterSource>()
 
         jdbcTemplate.batchUpdate(sql, params)
+
+        val subtaskSql = """
+            INSERT INTO stage_task_subtasks(id, stage_task_id, name, sort_order)
+            VALUES (:id, :stageTaskId, :name, :sortOrder)
+        """.trimIndent()
+        val subtaskParams = tasks
+            .flatMap { task ->
+                task.subtasks.map { subtask ->
+                    MapSqlParameterSource()
+                        .addValue("id", subtask.id)
+                        .addValue("stageTaskId", subtask.stageTaskId)
+                        .addValue("name", subtask.name)
+                        .addValue("sortOrder", subtask.sortOrder)
+                }
+            }
+            .toTypedArray<SqlParameterSource>()
+
+        if (subtaskParams.isNotEmpty()) {
+            jdbcTemplate.batchUpdate(subtaskSql, subtaskParams)
+        }
 
         return tasks
     }

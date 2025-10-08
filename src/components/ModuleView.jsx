@@ -29,19 +29,36 @@ const ModuleView = ({
     stages.forEach((stage) => {
       const templates = [...(stage.tasks || [])]
         .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
-        .map((task) => ({
-          id: task.id,
-          stageId: stage.id,
-          name: task.name,
-          taskTypeId: null,
-          priority: '',
-          status: '',
-          startDate: '',
-          endDate: '',
-          description: '',
-          children: [],
-          isTemplate: true
-        }));
+        .map((task) => {
+          const children = [...(task.subtasks || [])]
+            .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+            .map((subtask) => ({
+              id: subtask.id,
+              stageId: stage.id,
+              name: subtask.name,
+              taskTypeId: null,
+              priority: '',
+              status: '',
+              startDate: '',
+              endDate: '',
+              description: '',
+              children: [],
+              isTemplate: true
+            }));
+          return {
+            id: task.id,
+            stageId: stage.id,
+            name: task.name,
+            taskTypeId: null,
+            priority: '',
+            status: '',
+            startDate: '',
+            endDate: '',
+            description: '',
+            children,
+            isTemplate: true
+          };
+        });
       map.set(stage.id, templates);
     });
     return map;

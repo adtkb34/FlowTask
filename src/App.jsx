@@ -5,6 +5,8 @@ import Modal from './components/Modal.jsx';
 const PRIORITIES = ['低', '中', '高'];
 const STATUSES = ['未开始', '进行中', '已完成'];
 
+const createEmptyStageTask = () => ({ name: '', subtasks: [''] });
+
 async function requestJson(path, options = {}) {
   const response = await fetch(path, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
@@ -47,7 +49,7 @@ export default function App() {
     mode: 'create',
     stageId: null,
     name: '',
-    tasks: ['']
+    tasks: [createEmptyStageTask()]
   });
   const [taskTypeModalState, setTaskTypeModalState] = useState({
     open: false,
@@ -171,11 +173,11 @@ export default function App() {
   }, [modules, selectedProjectId]);
 
   const closeStageModal = () => {
-    setStageModalState({ open: false, mode: 'create', stageId: null, name: '', tasks: [''] });
+    setStageModalState({ open: false, mode: 'create', stageId: null, name: '', tasks: [createEmptyStageTask()] });
   };
 
   const openCreateStageModal = () => {
-    setStageModalState({ open: true, mode: 'create', stageId: null, name: '', tasks: [''] });
+    setStageModalState({ open: true, mode: 'create', stageId: null, name: '', tasks: [createEmptyStageTask()] });
   };
 
   const openEditStageModal = (stageId) => {
@@ -185,18 +187,25 @@ export default function App() {
       mode: 'edit',
       stageId,
       name: targetStage?.name || '',
-      tasks: targetStage?.tasks?.map((task) => task.name) || ['']
+      tasks:
+        targetStage?.tasks?.map((task) => ({
+          name: task?.name || '',
+          subtasks:
+            task?.subtasks && task.subtasks.length > 0
+              ? task.subtasks.map((subtask) => subtask.name)
+              : ['']
+        })) || [createEmptyStageTask()]
     });
   };
 
   const addStageTaskField = () => {
-    setStageModalState((prev) => ({ ...prev, tasks: [...prev.tasks, ''] }));
+    setStageModalState((prev) => ({ ...prev, tasks: [...prev.tasks, createEmptyStageTask()] }));
   };
 
   const updateStageTaskValue = (index, value) => {
     setStageModalState((prev) => {
       const nextTasks = [...prev.tasks];
-      nextTasks[index] = value;
+      nextTasks[index] = { ...nextTasks[index], name: value };
       return { ...prev, tasks: nextTasks };
     });
   };
@@ -204,7 +213,42 @@ export default function App() {
   const removeStageTaskField = (index) => {
     setStageModalState((prev) => {
       const nextTasks = prev.tasks.filter((_, taskIndex) => taskIndex !== index);
-      return { ...prev, tasks: nextTasks.length > 0 ? nextTasks : [''] };
+      return { ...prev, tasks: nextTasks.length > 0 ? nextTasks : [createEmptyStageTask()] };
+    });
+  };
+
+  const addStageSubtaskField = (taskIndex) => {
+    setStageModalState((prev) => {
+      const nextTasks = prev.tasks.map((task, index) => {
+        if (index !== taskIndex) return task;
+        const currentSubtasks = Array.isArray(task?.subtasks) ? task.subtasks : [];
+        return { ...task, subtasks: [...currentSubtasks, ''] };
+      });
+      return { ...prev, tasks: nextTasks };
+    });
+  };
+
+  const updateStageSubtaskValue = (taskIndex, subtaskIndex, value) => {
+    setStageModalState((prev) => {
+      const nextTasks = prev.tasks.map((task, index) => {
+        if (index !== taskIndex) return task;
+        const nextSubtasks = [...(Array.isArray(task?.subtasks) ? task.subtasks : [])];
+        nextSubtasks[subtaskIndex] = value;
+        return { ...task, subtasks: nextSubtasks };
+      });
+      return { ...prev, tasks: nextTasks };
+    });
+  };
+
+  const removeStageSubtaskField = (taskIndex, subtaskIndex) => {
+    setStageModalState((prev) => {
+      const nextTasks = prev.tasks.map((task, index) => {
+        if (index !== taskIndex) return task;
+        const currentSubtasks = Array.isArray(task?.subtasks) ? task.subtasks : [];
+        const nextSubtasks = currentSubtasks.filter((_, idx) => idx !== subtaskIndex);
+        return { ...task, subtasks: nextSubtasks.length > 0 ? nextSubtasks : [''] };
+      });
+      return { ...prev, tasks: nextTasks };
     });
   };
 
@@ -226,11 +270,24 @@ export default function App() {
     const trimmedName = stageModalState.name.trim();
     if (!trimmedName) return;
     const normalizedTasks = stageModalState.tasks
-      .map((taskName) => taskName.trim())
-      .filter((taskName) => taskName.length > 0);
+      .map((task) => {
+        const trimmedTaskName = (task?.name || '').trim();
+        if (!trimmedTaskName) {
+          return null;
+        }
+        const normalizedSubtasks = (task?.subtasks || [])
+          .map((subtaskName) => (subtaskName || '').trim())
+          .filter((subtaskName) => subtaskName.length > 0)
+          .map((subtaskName) => ({ name: subtaskName }));
+        return {
+          name: trimmedTaskName,
+          subtasks: normalizedSubtasks
+        };
+      })
+      .filter(Boolean);
     const payload = {
       name: trimmedName,
-      tasks: normalizedTasks.map((taskName) => ({ name: taskName }))
+      tasks: normalizedTasks
     };
     try {
       if (stageModalState.mode === 'create') {
@@ -523,7 +580,16 @@ export default function App() {
                           {stage.tasks && stage.tasks.length > 0 ? (
                             <ul className="stage-task-list">
                               {stage.tasks.map((task) => (
-                                <li key={task.id}>{task.name}</li>
+                                <li key={task.id}>
+                                  <div className="stage-task-title">{task.name}</div>
+                                  {task.subtasks && task.subtasks.length > 0 ? (
+                                    <ul className="stage-subtask-list">
+                                      {task.subtasks.map((subtask) => (
+                                        <li key={subtask.id}>{subtask.name}</li>
+                                      ))}
+                                    </ul>
+                                  ) : null}
+                                </li>
                               ))}
                             </ul>
                           ) : (
@@ -820,26 +886,55 @@ export default function App() {
         <label className="form-field">
           <span>阶段任务（可选）</span>
           <div className="stage-task-editor">
-            {stageModalState.tasks.map((taskName, index) => (
-              <div key={`stage-task-${index}`} className="stage-task-row">
-                <input
-                  value={taskName}
-                  onChange={(event) => updateStageTaskValue(index, event.target.value)}
-                  placeholder="请输入任务名称"
-                />
-                <button
-                  type="button"
-                  className="stage-task-remove-button"
-                  onClick={() => removeStageTaskField(index)}
-                >
-                  删除
-                </button>
+            {stageModalState.tasks.map((task, index) => (
+              <div key={`stage-task-${index}`} className="stage-task-group">
+                <div className="stage-task-row">
+                  <input
+                    value={task?.name || ''}
+                    onChange={(event) => updateStageTaskValue(index, event.target.value)}
+                    placeholder="请输入任务名称"
+                  />
+                  <button
+                    type="button"
+                    className="stage-task-remove-button"
+                    onClick={() => removeStageTaskField(index)}
+                  >
+                    删除任务
+                  </button>
+                </div>
+                <div className="stage-subtask-editor">
+                  {(task?.subtasks || []).map((subtaskName, subtaskIndex) => (
+                    <div key={`stage-subtask-${index}-${subtaskIndex}`} className="stage-subtask-row">
+                      <input
+                        value={subtaskName}
+                        onChange={(event) =>
+                          updateStageSubtaskValue(index, subtaskIndex, event.target.value)
+                        }
+                        placeholder="请输入子任务名称"
+                      />
+                      <button
+                        type="button"
+                        className="stage-task-remove-button"
+                        onClick={() => removeStageSubtaskField(index, subtaskIndex)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="link-button stage-subtask-add-button"
+                    onClick={() => addStageSubtaskField(index)}
+                  >
+                    + 添加子任务
+                  </button>
+                </div>
               </div>
             ))}
             <button type="button" className="link-button stage-task-add-button" onClick={addStageTaskField}>
               + 添加任务
             </button>
-            <div className="muted-text">将自动忽略为空的任务名称。</div>
+            <div className="muted-text">任务或子任务名称为空时将被忽略。</div>
           </div>
         </label>
       </Modal>

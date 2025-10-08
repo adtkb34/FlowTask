@@ -224,23 +224,54 @@ body {
   margin: 0;
   padding: 0;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.stage-task-list li {
+.stage-task-list > li {
+  background-color: #eef2ff;
+  color: #1e3a8a;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.stage-task-title {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.stage-subtask-list {
+  list-style: none;
+  margin: 6px 0 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stage-subtask-list li {
   background-color: #e0e7ff;
   color: #3730a3;
-  padding: 4px 10px;
-  border-radius: 999px;
+  padding: 4px 8px;
+  border-radius: 6px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .stage-task-editor {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
+}
+
+.stage-task-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background-color: #f8fafc;
 }
 
 .stage-task-row {
@@ -250,6 +281,22 @@ body {
 }
 
 .stage-task-row input {
+  flex: 1;
+}
+
+.stage-subtask-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stage-subtask-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stage-subtask-row input {
   flex: 1;
 }
 
@@ -267,7 +314,8 @@ body {
   text-decoration: underline;
 }
 
-.stage-task-add-button {
+.stage-task-add-button,
+.stage-subtask-add-button {
   align-self: flex-start;
   margin-top: 4px;
 }
@@ -415,13 +463,6 @@ body {
 .entity-item-count {
   font-size: 12px;
   color: #64748b;
-}
-
-.stage-task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
 }
 
 .stage-task-item {
