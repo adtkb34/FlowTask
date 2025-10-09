@@ -104,6 +104,23 @@ const PieChart = ({ data, size = 240 }) => {
         const startAngle = currentAngle;
         const endAngle = startAngle + sliceAngle;
         currentAngle = endAngle;
+
+        if (sliceAngle >= Math.PI * 2 - 1e-6) {
+          return (
+            <circle
+              key={item.key}
+              cx={center}
+              cy={center}
+              r={radius}
+              fill={item.color}
+              stroke="#ffffff"
+              strokeWidth={1.5}
+            >
+              <title>{`${item.label}: ${item.value} (${item.percentage})`}</title>
+            </circle>
+          );
+        }
+
         return (
           <path
             key={item.key}
