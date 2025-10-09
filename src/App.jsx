@@ -6,6 +6,7 @@ import Modal from './components/Modal.jsx';
 const PRIORITIES = ['低', '中', '高'];
 const STATUSES = ['未开始', '进行中', '已完成'];
 const PROJECT_TASKS_KEY = '__project__';
+const ALL_MODULES_KEY = '__all__';
 
 const createEmptyStageTask = () => ({ name: '', subtasks: [''] });
 
@@ -107,13 +108,13 @@ export default function App() {
         const projectModules = data.modules.filter((module) => module.projectId === nextProjectId);
         const moduleIds = new Set(projectModules.map((module) => module.id));
         let nextModuleId = overrideModuleId ?? selectedModuleId;
-        if (nextModuleId !== PROJECT_TASKS_KEY && !moduleIds.has(nextModuleId)) {
+        if (![PROJECT_TASKS_KEY, ALL_MODULES_KEY].includes(nextModuleId) && !moduleIds.has(nextModuleId)) {
           nextModuleId = projectModules[0]?.id || PROJECT_TASKS_KEY;
         }
         if (!nextModuleId) {
           nextModuleId = moduleIds.size > 0 ? projectModules[0]?.id : PROJECT_TASKS_KEY;
         }
-        if (!moduleIds.has(nextModuleId) && nextModuleId !== PROJECT_TASKS_KEY) {
+        if (!moduleIds.has(nextModuleId) && ![PROJECT_TASKS_KEY, ALL_MODULES_KEY].includes(nextModuleId)) {
           nextModuleId = PROJECT_TASKS_KEY;
         }
 
@@ -170,6 +171,11 @@ export default function App() {
         ? { id: null, projectId: selectedProject.id, name: '项目任务（未分配模块）', workflowId: null }
         : null;
     }
+    if (selectedModuleId === ALL_MODULES_KEY) {
+      return selectedProject
+        ? { id: null, projectId: selectedProject.id, name: '全部模块', workflowId: null }
+        : null;
+    }
     return modules.find((module) => module.id === selectedModuleId) || null;
   }, [modules, selectedModuleId, selectedProject]);
 
@@ -199,6 +205,9 @@ export default function App() {
   const tasksForCurrentSelection = useMemo(() => {
     if (selectedModuleId === PROJECT_TASKS_KEY) {
       return tasksForSelectedProject.filter((task) => !task.moduleId);
+    }
+    if (selectedModuleId === ALL_MODULES_KEY) {
+      return tasksForSelectedProject;
     }
     if (!selectedModuleId) {
       return [];
@@ -297,8 +306,8 @@ export default function App() {
     setSelectedProjectId(nextProjectId);
     const projectModules = modules.filter((module) => module.projectId === nextProjectId);
     const nextModuleId =
-      selectedModuleId === PROJECT_TASKS_KEY
-        ? PROJECT_TASKS_KEY
+      selectedModuleId === PROJECT_TASKS_KEY || selectedModuleId === ALL_MODULES_KEY
+        ? selectedModuleId
         : projectModules.some((module) => module.id === selectedModuleId)
         ? selectedModuleId
         : projectModules[0]?.id || PROJECT_TASKS_KEY;
@@ -568,7 +577,10 @@ export default function App() {
       });
       await loadData({
         projectId: created.projectId,
-        moduleId: created.moduleId ?? PROJECT_TASKS_KEY
+        moduleId:
+          selectedModuleId === ALL_MODULES_KEY
+            ? ALL_MODULES_KEY
+            : created.moduleId ?? PROJECT_TASKS_KEY
       });
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : '新增任务失败');
@@ -584,7 +596,12 @@ export default function App() {
       });
       await loadData({
         projectId: targetTask?.projectId ?? selectedProjectId,
-        moduleId: targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+        moduleId:
+          selectedModuleId === ALL_MODULES_KEY
+            ? ALL_MODULES_KEY
+            : updates.moduleId !== undefined
+            ? updates.moduleId ?? PROJECT_TASKS_KEY
+            : targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
       });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : '更新任务失败');
@@ -599,7 +616,10 @@ export default function App() {
       });
       await loadData({
         projectId: targetTask?.projectId ?? selectedProjectId,
-        moduleId: targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+        moduleId:
+          selectedModuleId === ALL_MODULES_KEY
+            ? ALL_MODULES_KEY
+            : targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
       });
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除任务失败');
@@ -898,6 +918,7 @@ export default function App() {
                   onChange={handleModuleSelectionChange}
                   disabled={!selectedProjectId}
                 >
+                  <option value={ALL_MODULES_KEY}>全部模块</option>
                   <option value={PROJECT_TASKS_KEY}>项目任务（未分配模块）</option>
                   {modulesForSelectedProject.map((module) => (
                     <option key={module.id} value={module.id}>
@@ -921,6 +942,10 @@ export default function App() {
                 stages={stages}
                 taskTypes={taskTypes}
                 tasks={tasksForCurrentSelection}
+                modules={modulesForSelectedProject}
+                selectedModuleId={selectedModuleId}
+                projectTasksKey={PROJECT_TASKS_KEY}
+                allModulesKey={ALL_MODULES_KEY}
                 onAddTask={handleAddTask}
                 onUpdateTask={handleUpdateTask}
                 onDeleteTask={handleDeleteTask}

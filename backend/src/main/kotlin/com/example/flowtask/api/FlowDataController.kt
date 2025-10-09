@@ -132,15 +132,17 @@ class FlowDataController(private val flowDataService: FlowDataService) {
         if (request.parentTaskId != null && request.parentStageTaskId != null) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
         }
+        validateWorkLogs(request.workLogs)
         return flowDataService.createTask(request)
     }
 
     @PutMapping("/tasks/{id}")
     fun updateTask(@PathVariable id: String, @RequestBody request: TaskUpdateRequest): Task {
-        validateTaskPayload(null, null, request.stageId, request.name, request.priority, request.status)
+        validateTaskPayload(null, request.moduleId, request.stageId, request.name, request.priority, request.status)
         if (request.parentTaskId != null && request.parentStageTaskId != null) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
         }
+        validateWorkLogs(request.workLogs)
         return flowDataService.updateTask(id, request)
     }
 
@@ -175,6 +177,17 @@ class FlowDataController(private val flowDataService: FlowDataService) {
         }
         if (status == null || status.isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task status is required")
+        }
+    }
+
+    private fun validateWorkLogs(logs: List<TaskWorkLogRequest>) {
+        logs.forEach { log ->
+            if (log.workTime.isBlank()) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Work log time is required")
+            }
+            if (log.content.isBlank()) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Work log content is required")
+            }
         }
     }
 
