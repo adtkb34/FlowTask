@@ -1008,6 +1008,37 @@ body {
   min-height: 96px;
 }
 
+.worklog-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.worklog-row {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) 1fr auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.worklog-row input {
+  width: 100%;
+}
+
+.worklog-row textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.worklog-remove-button {
+  align-self: center;
+  white-space: nowrap;
+}
+
+.worklog-add-button {
+  align-self: flex-start;
+}
+
 .dialog-field--wide {
   grid-column: 1 / -1;
 }

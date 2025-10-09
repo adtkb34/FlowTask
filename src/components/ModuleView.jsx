@@ -62,6 +62,22 @@ const formatDateTimeForDisplay = (value) => {
   return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
 
+const formatDateTimeForInput = (value) => {
+  const timestamp = parseToTimestamp(value);
+  if (timestamp === null) {
+    return '';
+  }
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
+const createEmptyWorkLog = () => ({ workTime: '', content: '' });
+
 const buildWorkContentText = (workLogs) => {
   if (!Array.isArray(workLogs) || workLogs.length === 0) {
     return '';
@@ -89,6 +105,10 @@ const ModuleView = ({
   stages,
   taskTypes,
   tasks,
+  modules,
+  selectedModuleId,
+  projectTasksKey,
+  allModulesKey,
   onAddTask,
   onUpdateTask,
   onDeleteTask,
@@ -96,6 +116,21 @@ const ModuleView = ({
   statuses
 }) => {
   const stageMap = useMemo(() => new Map(stages.map((stage) => [stage.id, stage])), [stages]);
+  const moduleMap = useMemo(() => {
+    const map = new Map();
+    (Array.isArray(modules) ? modules : []).forEach((item) => {
+      if (item && item.id) {
+        map.set(item.id, item);
+      }
+    });
+    return map;
+  }, [modules]);
+  const defaultModuleIdForForm = useMemo(() => {
+    if (!selectedModuleId || selectedModuleId === projectTasksKey || selectedModuleId === allModulesKey) {
+      return '';
+    }
+    return selectedModuleId;
+  }, [allModulesKey, projectTasksKey, selectedModuleId]);
   const stageRemarkMap = useMemo(() => {
     const map = new Map();
     stages.forEach((stage) => {
@@ -233,6 +268,7 @@ const ModuleView = ({
 
   const emptyForm = useMemo(
     () => ({
+      moduleId: defaultModuleIdForForm,
       stageId: stageOrder[0] || '',
       name: '',
       taskTypeId: '',
@@ -240,19 +276,30 @@ const ModuleView = ({
       status: defaultStatus,
       startDate: '',
       endDate: '',
-      description: ''
+      description: '',
+      workLogs: [createEmptyWorkLog()]
     }),
-    [stageOrder, defaultPriority, defaultStatus]
+    [defaultModuleIdForForm, stageOrder, defaultPriority, defaultStatus]
   );
 
-  const [dialogState, setDialogState] = useState({
+  const buildInitialFormState = useCallback(
+    () => ({
+      ...emptyForm,
+      workLogs: Array.isArray(emptyForm.workLogs)
+        ? emptyForm.workLogs.map((log) => ({ ...log }))
+        : [createEmptyWorkLog()]
+    }),
+    [emptyForm]
+  );
+
+  const [dialogState, setDialogState] = useState(() => ({
     open: false,
     mode: 'create',
     parentTaskId: null,
     parentStageTaskId: null,
     taskId: null,
-    form: emptyForm
-  });
+    form: buildInitialFormState()
+  }));
   const [timeFilter, setTimeFilter] = useState({ type: 'start', start: '', end: '' });
 
   const parentTaskOptions = useMemo(() => {
@@ -269,9 +316,9 @@ const ModuleView = ({
       parentTaskId: null,
       parentStageTaskId: null,
       taskId: null,
-      form: { ...emptyForm }
+      form: buildInitialFormState()
     });
-  }, [emptyForm, module?.id, workflow.id]);
+  }, [buildInitialFormState, module?.id, selectedModuleId, workflow.id]);
 
   const stageGroups = useMemo(() => {
     const stageIdSet = new Set(stageOrder);
@@ -393,11 +440,12 @@ const ModuleView = ({
       parentTaskId: null,
       parentStageTaskId: null,
       taskId: null,
-      form: { ...emptyForm }
+      form: buildInitialFormState()
     });
   };
 
   const openCreateSubtaskDialog = (task) => {
+    const baseForm = buildInitialFormState();
     setDialogState({
       open: true,
       mode: 'create',
@@ -405,10 +453,11 @@ const ModuleView = ({
       parentStageTaskId: null,
       taskId: null,
       form: {
-        ...emptyForm,
+        ...baseForm,
+        moduleId: task.moduleId || baseForm.moduleId || '',
         stageId: task.stageId,
-        priority: task.priority || emptyForm.priority,
-        status: task.status || emptyForm.status
+        priority: task.priority || baseForm.priority,
+        status: task.status || baseForm.status
       }
     });
   };
@@ -421,6 +470,7 @@ const ModuleView = ({
       parentStageTaskId: task.parentStageTaskId || null,
       taskId: task.id,
       form: {
+        moduleId: task.moduleId || '',
         stageId: task.stageId,
         name: task.name,
         taskTypeId: task.taskTypeId || '',
@@ -428,7 +478,14 @@ const ModuleView = ({
         status: task.status || defaultStatus,
         startDate: task.startDate || '',
         endDate: task.endDate || '',
-        description: task.description || ''
+        description: task.description || '',
+        workLogs:
+          Array.isArray(task.workLogs) && task.workLogs.length > 0
+            ? task.workLogs.map((log) => ({
+                workTime: formatDateTimeForInput(log?.workTime),
+                content: typeof log?.content === 'string' ? log.content : ''
+              }))
+            : [createEmptyWorkLog()]
       }
     });
   };
@@ -450,6 +507,55 @@ const ModuleView = ({
     });
   };
 
+  const updateWorkLogField = (index, field, value) => {
+    setDialogState((prev) => {
+      const currentLogs = Array.isArray(prev.form.workLogs) ? prev.form.workLogs : [];
+      const nextLogs = currentLogs.map((log, logIndex) => {
+        if (logIndex !== index) {
+          return log;
+        }
+        return {
+          ...log,
+          [field]: value
+        };
+      });
+      return {
+        ...prev,
+        form: {
+          ...prev.form,
+          workLogs: nextLogs
+        }
+      };
+    });
+  };
+
+  const addWorkLog = () => {
+    setDialogState((prev) => {
+      const currentLogs = Array.isArray(prev.form.workLogs) ? prev.form.workLogs : [];
+      return {
+        ...prev,
+        form: {
+          ...prev.form,
+          workLogs: [...currentLogs, createEmptyWorkLog()]
+        }
+      };
+    });
+  };
+
+  const removeWorkLog = (index) => {
+    setDialogState((prev) => {
+      const currentLogs = Array.isArray(prev.form.workLogs) ? prev.form.workLogs : [];
+      const nextLogs = currentLogs.filter((_, logIndex) => logIndex !== index);
+      return {
+        ...prev,
+        form: {
+          ...prev.form,
+          workLogs: nextLogs.length > 0 ? nextLogs : [createEmptyWorkLog()]
+        }
+      };
+    });
+  };
+
   const closeDialog = () => {
     setDialogState({
       open: false,
@@ -457,7 +563,7 @@ const ModuleView = ({
       parentTaskId: null,
       parentStageTaskId: null,
       taskId: null,
-      form: { ...emptyForm }
+      form: buildInitialFormState()
     });
   };
 
@@ -467,9 +573,23 @@ const ModuleView = ({
     if (!dialogState.form.stageId) return;
 
     const normalizedTaskTypeId = dialogState.form.taskTypeId ? dialogState.form.taskTypeId : null;
+    const trimmedModuleId = typeof dialogState.form.moduleId === 'string' ? dialogState.form.moduleId.trim() : '';
+    const normalizedModuleId = trimmedModuleId ? trimmedModuleId : null;
+    const normalizedWorkLogs = Array.isArray(dialogState.form.workLogs)
+      ? dialogState.form.workLogs
+          .map((log) => {
+            const workTime = typeof log?.workTime === 'string' ? log.workTime.trim() : '';
+            const content = typeof log?.content === 'string' ? log.content.trim() : '';
+            if (!workTime || !content) {
+              return null;
+            }
+            return { workTime, content };
+          })
+          .filter(Boolean)
+      : [];
     const payload = {
       projectId: project.id,
-      moduleId: module?.id ?? null,
+      moduleId: normalizedModuleId,
       stageId: dialogState.form.stageId,
       taskTypeId: normalizedTaskTypeId,
       name: dialogState.form.name.trim(),
@@ -479,14 +599,15 @@ const ModuleView = ({
       startDate: dialogState.form.startDate,
       endDate: dialogState.form.endDate,
       parentTaskId: dialogState.mode === 'create' ? dialogState.parentTaskId : null,
-      parentStageTaskId:
-        dialogState.mode === 'create' ? dialogState.parentStageTaskId : null
+      parentStageTaskId: dialogState.mode === 'create' ? dialogState.parentStageTaskId : null,
+      workLogs: normalizedWorkLogs
     };
 
     if (dialogState.mode === 'create') {
       onAddTask(payload);
     } else if (dialogState.mode === 'edit' && dialogState.taskId) {
       onUpdateTask(dialogState.taskId, {
+        moduleId: payload.moduleId,
         stageId: payload.stageId,
         taskTypeId: payload.taskTypeId,
         name: payload.name,
@@ -496,7 +617,8 @@ const ModuleView = ({
         startDate: payload.startDate,
         endDate: payload.endDate,
         parentTaskId: dialogState.parentTaskId,
-        parentStageTaskId: dialogState.parentStageTaskId
+        parentStageTaskId: dialogState.parentStageTaskId,
+        workLogs: normalizedWorkLogs
       });
     }
 
@@ -578,6 +700,7 @@ const ModuleView = ({
             <tr>
               <th>任务</th>
               <th>阶段</th>
+              <th>模块</th>
               <th>任务类型</th>
               <th>优先级</th>
               <th>状态</th>
@@ -593,7 +716,7 @@ const ModuleView = ({
               return (
                 <Fragment key={group.stageId}>
                   <tr className="stage-header">
-                    <td colSpan={9}>
+                    <td colSpan={10}>
                       <div className="stage-header-content">
                         <span className="stage-header-title">{group.stage?.name || '未命名阶段'}</span>
                         {stageRemark ? (
@@ -611,11 +734,16 @@ const ModuleView = ({
                         const workCellText = isTemplate
                           ? '--'
                           : workContentText || (isWorkTimeFilterActive && hasAnyWorkLogs ? '该时间段无记录' : '--');
+                        const moduleCellText = isTemplate
+                          ? '--'
+                          : node.moduleId
+                          ? moduleMap.get(node.moduleId)?.name || '未知模块'
+                          : '未分配模块';
                         return (
                           <tr key={node.id} className={isTemplate ? 'template-task-row' : undefined}>
-                        <td>
-                          <div className="task-name-cell">
-                            <div
+                            <td>
+                              <div className="task-name-cell">
+                                <div
                               className="task-name-title"
                               style={{ paddingLeft: depth * 16 }}
                             >
@@ -630,14 +758,15 @@ const ModuleView = ({
                                 {node.description}
                               </div>
                             )}
-                          </div>
-                        </td>
-                        <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
-                        <td>
-                          {isTemplate
-                            ? '--'
-                            : node.taskTypeId
-                            ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
+                              </div>
+                            </td>
+                            <td>{stageMap.get(node.stageId)?.name || '未指定'}</td>
+                            <td>{moduleCellText}</td>
+                            <td>
+                              {isTemplate
+                                ? '--'
+                                : node.taskTypeId
+                                ? taskTypesMap.get(node.taskTypeId)?.name || '未指定'
                             : '未指定'}
                         </td>
                         <td>{isTemplate ? '--' : node.priority}</td>
@@ -682,7 +811,7 @@ const ModuleView = ({
                   </>
                 ) : (
                   <tr className="empty-row">
-                    <td colSpan={9}>{emptyStageMessage}</td>
+                    <td colSpan={10}>{emptyStageMessage}</td>
                   </tr>
                 )}
                 </Fragment>
@@ -704,6 +833,20 @@ const ModuleView = ({
             </h3>
             <form onSubmit={handleSubmit} className="dialog-form">
               <div className="dialog-grid">
+                <label className="dialog-field">
+                  <span>所属模块</span>
+                  <select
+                    value={dialogState.form.moduleId}
+                    onChange={(event) => updateDialogForm('moduleId', event.target.value)}
+                  >
+                    <option value="">项目任务（未分配模块）</option>
+                    {(Array.isArray(modules) ? modules : []).map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="dialog-field">
                   <span>所属阶段</span>
                   <select
@@ -824,6 +967,36 @@ const ModuleView = ({
                     placeholder="补充任务描述"
                   />
                 </label>
+                <div className="dialog-field dialog-field-full">
+                  <span>工作内容记录</span>
+                  <div className="worklog-editor">
+                    {(Array.isArray(dialogState.form.workLogs) ? dialogState.form.workLogs : []).map((log, index) => (
+                      <div key={`work-log-${index}`} className="worklog-row">
+                        <input
+                          type="datetime-local"
+                          value={log?.workTime || ''}
+                          onChange={(event) => updateWorkLogField(index, 'workTime', event.target.value)}
+                        />
+                        <textarea
+                          value={log?.content || ''}
+                          onChange={(event) => updateWorkLogField(index, 'content', event.target.value)}
+                          placeholder="填写具体工作内容"
+                        />
+                        <button
+                          type="button"
+                          className="secondary-action worklog-remove-button"
+                          onClick={() => removeWorkLog(index)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" className="link-button worklog-add-button" onClick={addWorkLog}>
+                      + 添加工作记录
+                    </button>
+                    <div className="muted-text">仅保存填写了时间和内容的记录。</div>
+                  </div>
+                </div>
               </div>
               <div className="dialog-actions">
                 <button type="button" className="secondary" onClick={closeDialog}>
