@@ -28,6 +28,16 @@ const UNASSIGNED_MODULE_KEY = '__unassigned__';
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
+const normalizeStringKey = (value, emptyKey) => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+  return emptyKey;
+};
+
 const adjustColor = (hex, amount) => {
   if (!hex) return '#94a3b8';
   let normalized = hex.replace('#', '');
@@ -239,26 +249,57 @@ const Dashboard = ({
     return options;
   }, [modules, tasks, moduleLabelMap]);
 
-  const [selectedModuleIds, setSelectedModuleIds] = useState(() => moduleOptions.map((option) => option.id));
+  const moduleTaskCounts = useMemo(() => {
+    const counts = new Map();
+    tasks.forEach((task) => {
+      const key = task?.moduleId ?? UNASSIGNED_MODULE_KEY;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return counts;
+  }, [tasks]);
+
+  const [selectedModuleIds, setSelectedModuleIds] = useState(() => {
+    const optionIds = moduleOptions.map((option) => option.id);
+    const withTasks = optionIds.filter((id) => (moduleTaskCounts.get(id) || 0) > 0);
+    if (withTasks.length > 0) {
+      return withTasks;
+    }
+    return optionIds;
+  });
   const [modulesExpanded, setModulesExpanded] = useState(true);
 
   useEffect(() => {
     const optionIds = moduleOptions.map((option) => option.id);
+    const optionIdsWithTasks = optionIds.filter((id) => (moduleTaskCounts.get(id) || 0) > 0);
+    const defaultSelection = optionIdsWithTasks.length > 0 ? optionIdsWithTasks : optionIds;
     setSelectedModuleIds((prev) => {
       const filtered = prev.filter((id) => optionIds.includes(id));
       const selectedSet = new Set(filtered);
       const ordered = optionIds.filter((id) => selectedSet.has(id));
       const missing = optionIds.filter((id) => !selectedSet.has(id));
-      const next = [...ordered, ...missing];
+
+      let next = ordered;
+
+      if (missing.length > 0) {
+        const previouslySelectedAll =
+          filtered.length === optionIds.length - missing.length && filtered.length > 0;
+        if (previouslySelectedAll) {
+          const missingWithTasks = missing.filter((id) => (moduleTaskCounts.get(id) || 0) > 0);
+          if (missingWithTasks.length > 0) {
+            next = [...ordered, ...missingWithTasks];
+          }
+        }
+      }
+
       if (next.length === 0) {
-        return optionIds;
+        return defaultSelection;
       }
       if (next.length === prev.length && next.every((id, index) => id === prev[index])) {
         return prev;
       }
       return next;
     });
-  }, [moduleOptions]);
+  }, [moduleOptions, moduleTaskCounts]);
 
   const dimensionValueOptions = useMemo(() => {
     const knownStageIds = new Set();
@@ -352,6 +393,28 @@ const Dashboard = ({
     return initial;
   });
 
+  const dimensionValueUsage = useMemo(() => {
+    const usage = {
+      stage: new Map(),
+      taskType: new Map(),
+      priority: new Map(),
+      status: new Map()
+    };
+
+    const increment = (map, key) => {
+      map.set(key, (map.get(key) || 0) + 1);
+    };
+
+    tasks.forEach((task) => {
+      increment(usage.stage, task?.stageId || '__no_stage__');
+      increment(usage.taskType, task?.taskTypeId || '__no_task_type__');
+      increment(usage.priority, normalizeStringKey(task?.priority, '__no_priority__'));
+      increment(usage.status, normalizeStringKey(task?.status, '__no_status__'));
+    });
+
+    return usage;
+  }, [tasks]);
+
   useEffect(() => {
     setDimensionSelections((prev) => {
       let changed = false;
@@ -359,11 +422,14 @@ const Dashboard = ({
       GROUPING_FIELDS.forEach((field) => {
         const options = dimensionValueOptions[field.key] || [];
         const optionKeys = options.map((option) => option.key);
+        const usageMap = dimensionValueUsage[field.key] || new Map();
+        const optionKeysWithUsage = optionKeys.filter((key) => (usageMap.get(key) || 0) > 0);
+        const defaultSelected = optionKeysWithUsage.length > 0 ? optionKeysWithUsage : optionKeys;
         const prevEntry = prev[field.key];
         if (!prevEntry) {
           next[field.key] = {
             enabled: field.key === 'status',
-            selectedValues: optionKeys,
+            selectedValues: defaultSelected,
             availableValues: optionKeys
           };
           changed = true;
@@ -381,7 +447,11 @@ const Dashboard = ({
 
         let selectedValues = optionKeys.filter((key) => prevSelectedSet.has(key));
         if (previouslyAllSelected) {
-          selectedValues = optionKeys;
+          selectedValues = defaultSelected;
+        }
+
+        if (selectedValues.length === 0) {
+          selectedValues = defaultSelected;
         }
 
         const enabled = typeof prevEntry.enabled === 'boolean' ? prevEntry.enabled : field.key === 'status';
@@ -405,7 +475,7 @@ const Dashboard = ({
 
       return changed ? next : prev;
     });
-  }, [dimensionValueOptions]);
+  }, [dimensionValueOptions, dimensionValueUsage]);
 
   const dimensionSelectionState = useMemo(() => {
     const state = {};
@@ -413,22 +483,28 @@ const Dashboard = ({
       const entry = dimensionSelections[field.key];
       const options = dimensionValueOptions[field.key] || [];
       const optionKeys = options.map((option) => option.key);
+      const usageMap = dimensionValueUsage[field.key] || new Map();
+      const optionKeysWithUsage = optionKeys.filter((key) => (usageMap.get(key) || 0) > 0);
+      const defaultSelected = optionKeysWithUsage.length > 0 ? optionKeysWithUsage : optionKeys;
       if (!entry) {
         state[field.key] = {
           enabled: field.key === 'status',
-          selectedValues: optionKeys,
+          selectedValues: defaultSelected,
           availableValues: optionKeys
         };
       } else {
+        const selectedValues = Array.isArray(entry.selectedValues) ? entry.selectedValues : [];
+        const filteredSelection = optionKeys.filter((key) => selectedValues.includes(key));
+        const ensuredSelection = filteredSelection.length > 0 ? filteredSelection : defaultSelected;
         state[field.key] = {
           enabled: entry.enabled,
-          selectedValues: Array.isArray(entry.selectedValues) ? entry.selectedValues : [],
+          selectedValues: ensuredSelection,
           availableValues: Array.isArray(entry.availableValues) ? entry.availableValues : optionKeys
         };
       }
     });
     return state;
-  }, [dimensionSelections, dimensionValueOptions]);
+  }, [dimensionSelections, dimensionValueOptions, dimensionValueUsage]);
 
   const updateDimensionSelection = useCallback(
     (dimensionKey, updater) => {
