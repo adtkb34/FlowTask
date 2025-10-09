@@ -58,7 +58,15 @@ data class Task(
     val startDate: String?,
     val endDate: String?,
     val parentTaskId: String?,
-    val parentStageTaskId: String?
+    val parentStageTaskId: String?,
+    val workLogs: List<TaskWorkLog> = emptyList()
+)
+
+data class TaskWorkLog(
+    val id: String,
+    val taskId: String,
+    val workTime: String,
+    val content: String
 )
 
 data class FlowDataResponse(

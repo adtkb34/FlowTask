@@ -148,24 +148,31 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             FROM tasks
             ORDER BY created_at, name
         """
-        return jdbcTemplate.query(sql) { rs, _ ->
+        val tasks = jdbcTemplate.query(sql) { rs, _ ->
             Task(
-                id = rs.getString("id") ?: "",
-                projectId = rs.getString("project_id") ?: "",
-                moduleId = rs.getString("module_id") ?: "",
-                stageId = rs.getString("stage_id") ?: "",
-                taskTypeId = rs.getString("task_type_id") ?: "",
-                name = rs.getString("name") ?: "",
-                description = rs.getString("description") ?: "",
-                priority = rs.getString("priority") ?: "",
-                status = rs.getString("status") ?: "",
-                startDate = rs.getString("start_date") ?: "",
-                endDate = rs.getString("end_date") ?: "",
-                parentTaskId = rs.getString("parent_task_id") ?: "",
-                parentStageTaskId = rs.getString("parent_stage_task_id") ?: ""
+                id = rs.getString("id"),
+                projectId = rs.getString("project_id"),
+                moduleId = rs.getString("module_id")?.takeIf { it.isNotBlank() },
+                stageId = rs.getString("stage_id"),
+                taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
+                name = rs.getString("name"),
+                description = rs.getString("description"),
+                priority = rs.getString("priority"),
+                status = rs.getString("status"),
+                startDate = rs.getString("start_date"),
+                endDate = rs.getString("end_date"),
+                parentTaskId = rs.getString("parent_task_id")?.takeIf { it.isNotBlank() },
+                parentStageTaskId = rs.getString("parent_stage_task_id")?.takeIf { it.isNotBlank() }
             )
         }
+        if (tasks.isEmpty()) {
+            return tasks
+        }
 
+        val workLogs = loadTaskWorkLogs(tasks.map(Task::id))
+        return tasks.map { task ->
+            task.copy(workLogs = workLogs[task.id] ?: emptyList())
+        }
     }
 
     @Transactional
@@ -555,11 +562,11 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             FROM tasks
             WHERE id = :id
         """
-        return jdbcTemplate.queryForObject(sql, mapOf("id" to id)) { rs, _ ->
+        val task = jdbcTemplate.query(sql, mapOf("id" to id)) { rs, _ ->
             Task(
                 id = rs.getString("id"),
                 projectId = rs.getString("project_id"),
-                moduleId = rs.getString("module_id"),
+                moduleId = rs.getString("module_id")?.takeIf { it.isNotBlank() },
                 stageId = rs.getString("stage_id"),
                 taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
                 name = rs.getString("name"),
@@ -568,10 +575,13 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 status = rs.getString("status"),
                 startDate = rs.getString("start_date"),
                 endDate = rs.getString("end_date"),
-                parentTaskId = rs.getString("parent_task_id"),
-                parentStageTaskId = rs.getString("parent_stage_task_id")
+                parentTaskId = rs.getString("parent_task_id")?.takeIf { it.isNotBlank() },
+                parentStageTaskId = rs.getString("parent_stage_task_id")?.takeIf { it.isNotBlank() }
             )
-        } ?: throw EmptyResultDataAccessException(1)
+        }.firstOrNull() ?: throw EmptyResultDataAccessException(1)
+
+        val workLogs = loadTaskWorkLogs(listOf(task.id))[task.id] ?: emptyList()
+        return task.copy(workLogs = workLogs)
     }
 
     private fun parseDate(value: String?): LocalDate? {
@@ -581,5 +591,25 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         } catch (ex: DateTimeParseException) {
             throw IllegalArgumentException("Invalid date format: $value", ex)
         }
+    }
+
+    private fun loadTaskWorkLogs(taskIds: List<String>): Map<String, List<TaskWorkLog>> {
+        if (taskIds.isEmpty()) {
+            return emptyMap()
+        }
+        val sql = """
+            SELECT id, task_id, work_time, content
+            FROM task_work_logs
+            WHERE task_id IN (:taskIds)
+            ORDER BY task_id, work_time, created_at
+        """
+        return jdbcTemplate.query(sql, mapOf("taskIds" to taskIds)) { rs, _ ->
+            TaskWorkLog(
+                id = rs.getString("id"),
+                taskId = rs.getString("task_id"),
+                workTime = rs.getTimestamp("work_time")?.toLocalDateTime()?.toString() ?: "",
+                content = rs.getString("content") ?: ""
+            )
+        }.groupBy(TaskWorkLog::taskId)
     }
 }
