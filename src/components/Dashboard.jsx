@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 const STATUS_COLORS = {
   未开始: '#94a3b8',
@@ -98,6 +98,19 @@ const getTextColor = (hex) => {
   const b = num & 0xff;
   const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   return luminance > 0.6 ? '#0f172a' : '#f8fafc';
+};
+
+const IndeterminateCheckbox = ({ indeterminate, ...props }) => {
+  const setRef = useCallback(
+    (node) => {
+      if (node) {
+        node.indeterminate = Boolean(indeterminate);
+      }
+    },
+    [indeterminate]
+  );
+
+  return <input ref={setRef} {...props} />;
 };
 
 const PieChart = ({ data, size = 240 }) => {
@@ -246,7 +259,259 @@ const Dashboard = ({
     });
   }, [moduleOptions]);
 
-  const [selectedGroupFields, setSelectedGroupFields] = useState(['status']);
+  const dimensionValueOptions = useMemo(() => {
+    const knownStageIds = new Set();
+    const stageOptions = stages
+      .filter((stage) => stage && stage.id)
+      .map((stage) => {
+        knownStageIds.add(stage.id);
+        return { key: stage.id, label: stage.name || '未命名阶段' };
+      });
+    const extraStageIds = new Set();
+    tasks.forEach((task) => {
+      if (task?.stageId && !knownStageIds.has(task.stageId)) {
+        extraStageIds.add(task.stageId);
+      }
+    });
+    extraStageIds.forEach((stageId) => {
+      stageOptions.push({ key: stageId, label: `未知阶段(${stageId})` });
+    });
+    stageOptions.unshift({ key: '__no_stage__', label: '未指定阶段' });
+
+    const knownTaskTypeIds = new Set();
+    const taskTypeOptions = taskTypes
+      .filter((taskType) => taskType && taskType.id)
+      .map((taskType) => {
+        knownTaskTypeIds.add(taskType.id);
+        return { key: taskType.id, label: taskType.name || '未命名类型' };
+      });
+    const extraTaskTypeIds = new Set();
+    tasks.forEach((task) => {
+      if (task?.taskTypeId && !knownTaskTypeIds.has(task.taskTypeId)) {
+        extraTaskTypeIds.add(task.taskTypeId);
+      }
+    });
+    extraTaskTypeIds.forEach((taskTypeId) => {
+      taskTypeOptions.push({ key: taskTypeId, label: `未知类型(${taskTypeId})` });
+    });
+    taskTypeOptions.unshift({ key: '__no_task_type__', label: '未指定类型' });
+
+    const normalizeStringOptions = (values, emptyLabel) => {
+      const seen = new Set();
+      const normalized = [];
+      values.forEach((value) => {
+        const key = typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+        const optionKey = key || emptyLabel.key;
+        if (seen.has(optionKey)) {
+          return;
+        }
+        seen.add(optionKey);
+        normalized.push({ key: optionKey, label: key || emptyLabel.label });
+      });
+      const existingIndex = normalized.findIndex((item) => item.key === emptyLabel.key);
+      if (existingIndex >= 0) {
+        const [existing] = normalized.splice(existingIndex, 1);
+        normalized.unshift({ key: emptyLabel.key, label: existing.label || emptyLabel.label });
+      } else {
+        normalized.unshift(emptyLabel);
+      }
+      return normalized;
+    };
+
+    const priorityOptions = normalizeStringOptions(
+      [...priorities, ...tasks.map((task) => task?.priority ?? '')],
+      {
+        key: '__no_priority__',
+        label: '未设置优先级'
+      }
+    );
+
+    const statusOptions = normalizeStringOptions(
+      [...statuses, ...tasks.map((task) => task?.status ?? '')],
+      {
+        key: '__no_status__',
+        label: '未设置状态'
+      }
+    );
+
+    return {
+      stage: stageOptions,
+      taskType: taskTypeOptions,
+      priority: priorityOptions,
+      status: statusOptions
+    };
+  }, [priorities, stages, statuses, taskTypes, tasks]);
+
+  const [dimensionSelections, setDimensionSelections] = useState({});
+  const [expandedDimensions, setExpandedDimensions] = useState(() => {
+    const initial = {};
+    GROUPING_FIELDS.forEach((field) => {
+      initial[field.key] = true;
+    });
+    return initial;
+  });
+
+  useEffect(() => {
+    setDimensionSelections((prev) => {
+      let changed = false;
+      const next = {};
+      GROUPING_FIELDS.forEach((field) => {
+        const options = dimensionValueOptions[field.key] || [];
+        const optionKeys = options.map((option) => option.key);
+        const prevEntry = prev[field.key];
+        if (!prevEntry) {
+          next[field.key] = {
+            enabled: field.key === 'status',
+            selectedValues: optionKeys,
+            availableValues: optionKeys
+          };
+          changed = true;
+          return;
+        }
+
+        const prevSelectedSet = new Set(Array.isArray(prevEntry.selectedValues) ? prevEntry.selectedValues : []);
+        const previouslyAllSelected =
+          prevEntry.selectedValues &&
+          prevEntry.availableValues &&
+          prevEntry.selectedValues.length > 0 &&
+          prevEntry.availableValues.length > 0 &&
+          prevEntry.availableValues.length === prevEntry.selectedValues.length &&
+          prevEntry.availableValues.every((value) => prevSelectedSet.has(value));
+
+        let selectedValues = optionKeys.filter((key) => prevSelectedSet.has(key));
+        if (previouslyAllSelected) {
+          selectedValues = optionKeys;
+        }
+
+        const enabled = typeof prevEntry.enabled === 'boolean' ? prevEntry.enabled : field.key === 'status';
+        const nextEntry = {
+          enabled,
+          selectedValues,
+          availableValues: optionKeys
+        };
+
+        next[field.key] = nextEntry;
+        if (
+          prevEntry.enabled !== nextEntry.enabled ||
+          (prevEntry.availableValues || []).length !== nextEntry.availableValues.length ||
+          (prevEntry.availableValues || []).some((value, index) => value !== nextEntry.availableValues[index]) ||
+          prevEntry.selectedValues.length !== nextEntry.selectedValues.length ||
+          prevEntry.selectedValues.some((value, index) => value !== nextEntry.selectedValues[index])
+        ) {
+          changed = true;
+        }
+      });
+
+      return changed ? next : prev;
+    });
+  }, [dimensionValueOptions]);
+
+  const dimensionSelectionState = useMemo(() => {
+    const state = {};
+    GROUPING_FIELDS.forEach((field) => {
+      const entry = dimensionSelections[field.key];
+      const options = dimensionValueOptions[field.key] || [];
+      const optionKeys = options.map((option) => option.key);
+      if (!entry) {
+        state[field.key] = {
+          enabled: field.key === 'status',
+          selectedValues: optionKeys,
+          availableValues: optionKeys
+        };
+      } else {
+        state[field.key] = {
+          enabled: entry.enabled,
+          selectedValues: Array.isArray(entry.selectedValues) ? entry.selectedValues : [],
+          availableValues: Array.isArray(entry.availableValues) ? entry.availableValues : optionKeys
+        };
+      }
+    });
+    return state;
+  }, [dimensionSelections, dimensionValueOptions]);
+
+  const updateDimensionSelection = useCallback(
+    (dimensionKey, updater) => {
+      setDimensionSelections((prev) => {
+        const current = prev[dimensionKey] || {
+          enabled: dimensionKey === 'status',
+          selectedValues: (dimensionValueOptions[dimensionKey] || []).map((option) => option.key),
+          availableValues: (dimensionValueOptions[dimensionKey] || []).map((option) => option.key)
+        };
+
+        const result = updater(current, dimensionValueOptions[dimensionKey] || []);
+        const nextEntry = {
+          ...current,
+          ...result,
+          availableValues: current.availableValues
+        };
+
+        const isSame =
+          current.enabled === nextEntry.enabled &&
+          current.selectedValues.length === nextEntry.selectedValues.length &&
+          current.selectedValues.every((value, index) => value === nextEntry.selectedValues[index]);
+
+        if (isSame) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          [dimensionKey]: nextEntry
+        };
+      });
+    },
+    [dimensionValueOptions]
+  );
+
+  const handleDimensionToggle = useCallback(
+    (dimensionKey, enabled) => {
+      updateDimensionSelection(dimensionKey, (current) => ({
+        ...current,
+        enabled
+      }));
+    },
+    [updateDimensionSelection]
+  );
+
+  const handleDimensionSelectAll = useCallback(
+    (dimensionKey, checked) => {
+      const availableValues =
+        dimensionSelectionState[dimensionKey]?.availableValues ||
+        (dimensionValueOptions[dimensionKey] || []).map((option) => option.key);
+      updateDimensionSelection(dimensionKey, (current) => ({
+        ...current,
+        selectedValues: checked ? availableValues : []
+      }));
+    },
+    [dimensionSelectionState, dimensionValueOptions, updateDimensionSelection]
+  );
+
+  const handleDimensionValueToggle = useCallback(
+    (dimensionKey, valueKey, checked) => {
+      const options = dimensionValueOptions[dimensionKey] || [];
+      updateDimensionSelection(dimensionKey, (current) => {
+        const selectedSet = new Set(current.selectedValues);
+        if (checked) {
+          selectedSet.add(valueKey);
+        } else {
+          selectedSet.delete(valueKey);
+        }
+        const ordered = options.map((option) => option.key).filter((key) => selectedSet.has(key));
+        return {
+          ...current,
+          selectedValues: ordered
+        };
+      });
+    },
+    [dimensionValueOptions, updateDimensionSelection]
+  );
+
+  const toggleDimensionExpansion = useCallback((dimensionKey) => {
+    setExpandedDimensions((prev) => ({
+      ...prev,
+      [dimensionKey]: !prev[dimensionKey]
+    }));
+  }, []);
 
   const stageNameMap = useMemo(() => new Map(stages.map((stage) => [stage.id, stage.name])), [stages]);
   const taskTypeNameMap = useMemo(
@@ -268,15 +533,67 @@ const Dashboard = ({
 
   const moduleDimensionEnabled = moduleDistinctionEnabled && allowModuleDistinction;
 
+  const groupingFields = useMemo(() => {
+    const active = GROUPING_FIELDS.filter((field) => dimensionSelectionState[field.key]?.enabled).map((field) => field.key);
+    return active.length > 0 ? active : ['status'];
+  }, [dimensionSelectionState]);
+
+  const dimensionFilters = useMemo(() => {
+    const filters = {};
+    GROUPING_FIELDS.forEach((field) => {
+      const entry = dimensionSelectionState[field.key];
+      if (!entry || !entry.enabled) {
+        return;
+      }
+      const availableLength = entry.availableValues?.length || 0;
+      if (availableLength === 0) {
+        return;
+      }
+      if (!Array.isArray(entry.selectedValues) || entry.selectedValues.length === 0) {
+        filters[field.key] = new Set();
+        return;
+      }
+      if (entry.selectedValues.length === availableLength) {
+        return;
+      }
+      filters[field.key] = new Set(entry.selectedValues);
+    });
+    return filters;
+  }, [dimensionSelectionState]);
+
   const filteredTasks = useMemo(() => {
     if (selectedModuleIds.length === 0) {
       return [];
     }
     const selectedSet = new Set(selectedModuleIds);
-    return tasks.filter((task) => selectedSet.has(task.moduleId ?? UNASSIGNED_MODULE_KEY));
-  }, [selectedModuleIds, tasks]);
-
-  const groupingFields = selectedGroupFields.length > 0 ? selectedGroupFields : ['status'];
+    return tasks.filter((task) => {
+      if (!selectedSet.has(task.moduleId ?? UNASSIGNED_MODULE_KEY)) {
+        return false;
+      }
+      for (const [fieldKey, allowedValues] of Object.entries(dimensionFilters)) {
+        if (!(allowedValues instanceof Set)) {
+          continue;
+        }
+        let valueKey;
+        if (fieldKey === 'stage') {
+          valueKey = task.stageId || '__no_stage__';
+        } else if (fieldKey === 'taskType') {
+          valueKey = task.taskTypeId || '__no_task_type__';
+        } else if (fieldKey === 'priority') {
+          valueKey = task.priority || '__no_priority__';
+        } else if (fieldKey === 'status') {
+          valueKey = task.status || '__no_status__';
+        }
+        if (allowedValues.size === 0) {
+          return false;
+        }
+        if (!allowedValues.has(valueKey)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [dimensionFilters, selectedModuleIds, tasks]);
 
   const baseEntries = useMemo(() => {
     if (filteredTasks.length === 0) {
@@ -463,31 +780,74 @@ const Dashboard = ({
 
         <div className="dashboard-filter-group">
           <div className="dashboard-filter-title">饼图维度</div>
-          <div className="dashboard-checkbox-grid">
+          <div className="dashboard-filter-tree">
             {GROUPING_FIELDS.map((field) => {
-              const checked = selectedGroupFields.includes(field.key);
+              const selection = dimensionSelectionState[field.key];
+              const options = dimensionValueOptions[field.key] || [];
+              const expanded = expandedDimensions[field.key];
+              const selectedCount = selection?.selectedValues?.length || 0;
+              const totalCount = selection?.availableValues?.length || options.length;
+              const partiallySelected =
+                totalCount > 0 && selectedCount > 0 && selectedCount < totalCount;
+              const allSelected = totalCount > 0 && selectedCount === totalCount;
               return (
-                <label key={field.key}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={(event) => {
-                      const { checked: isChecked } = event.target;
-                      setSelectedGroupFields((prev) => {
-                        if (isChecked) {
-                          if (prev.includes(field.key)) return prev;
-                          return [...prev, field.key];
-                        }
-                        return prev.filter((item) => item !== field.key);
-                      });
-                    }}
-                  />
-                  {field.label}
-                </label>
+                <div key={field.key} className="dashboard-tree-node">
+                  <div className="dashboard-tree-header">
+                    <button
+                      type="button"
+                      className="dashboard-tree-expander"
+                      onClick={() => toggleDimensionExpansion(field.key)}
+                      aria-expanded={expanded}
+                      aria-label={expanded ? '折叠维度选项' : '展开维度选项'}
+                    >
+                      {expanded ? '▾' : '▸'}
+                    </button>
+                    <label className="dashboard-tree-parent">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(selection?.enabled)}
+                        onChange={(event) => handleDimensionToggle(field.key, event.target.checked)}
+                      />
+                      <span>{field.label}</span>
+                    </label>
+                    <span className="dashboard-tree-count">
+                      {selectedCount}/{totalCount || 0}
+                    </span>
+                  </div>
+                  {expanded ? (
+                    <div className="dashboard-tree-children">
+                      <label className="dashboard-tree-child">
+                        <IndeterminateCheckbox
+                          type="checkbox"
+                          checked={allSelected && totalCount > 0}
+                          indeterminate={partiallySelected}
+                          onChange={(event) => handleDimensionSelectAll(field.key, event.target.checked)}
+                          disabled={totalCount === 0}
+                        />
+                        <span>全选</span>
+                      </label>
+                      {options.map((option) => (
+                        <label key={option.key} className="dashboard-tree-child">
+                          <input
+                            type="checkbox"
+                            checked={selection?.selectedValues?.includes(option.key)}
+                            onChange={(event) =>
+                              handleDimensionValueToggle(field.key, option.key, event.target.checked)
+                            }
+                          />
+                          <span>{option.label}</span>
+                        </label>
+                      ))}
+                      {options.length === 0 ? (
+                        <div className="dashboard-tree-empty">暂无可选值</div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
               );
             })}
           </div>
-          <p className="dashboard-filter-hint">未选择维度时将按状态统计</p>
+          <p className="dashboard-filter-hint">未启用维度时将按状态统计</p>
         </div>
       </div>
 

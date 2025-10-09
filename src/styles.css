@@ -150,6 +150,97 @@ body {
   color: #1e293b;
 }
 
+.dashboard-filter-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dashboard-tree-node {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.dashboard-tree-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.dashboard-tree-expander {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+}
+
+.dashboard-tree-expander:hover {
+  background: #e2e8f0;
+}
+
+.dashboard-tree-parent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #1e293b;
+  flex: 1;
+}
+
+.dashboard-tree-parent input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+}
+
+.dashboard-tree-count {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.dashboard-tree-children {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+  padding: 8px 12px 12px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
+}
+
+.dashboard-tree-child {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.dashboard-tree-child input {
+  width: 16px;
+  height: 16px;
+  accent-color: #2563eb;
+  margin-top: 2px;
+}
+
+.dashboard-tree-empty {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 4px 0;
+}
+
 .dashboard-checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -1011,23 +1102,29 @@ body {
 .worklog-editor {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .worklog-row {
   display: grid;
-  grid-template-columns: minmax(0, 200px) 1fr auto;
-  gap: 8px;
-  align-items: start;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
 }
 
 .worklog-row input {
   width: 100%;
+  height: 40px;
 }
 
 .worklog-row textarea {
-  min-height: 72px;
+  min-height: 120px;
   resize: vertical;
+  line-height: 1.6;
 }
 
 .worklog-remove-button {
@@ -1037,6 +1134,20 @@ body {
 
 .worklog-add-button {
   align-self: flex-start;
+}
+
+@media (max-width: 720px) {
+  .dashboard-tree-children {
+    grid-template-columns: 1fr;
+  }
+
+  .worklog-row {
+    grid-template-columns: 1fr;
+  }
+
+  .worklog-remove-button {
+    justify-self: flex-start;
+  }
 }
 
 .dialog-field--wide {
