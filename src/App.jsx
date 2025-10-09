@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { isUnassignedModule, normalizeModuleId, resolveModuleId } from './utils/taskUtils.js';
 import ModuleView from './components/ModuleView.jsx';
 import Dashboard from './components/Dashboard.jsx';
 import Modal from './components/Modal.jsx';
@@ -204,15 +205,18 @@ export default function App() {
 
   const tasksForCurrentSelection = useMemo(() => {
     if (selectedModuleId === PROJECT_TASKS_KEY) {
-      return tasksForSelectedProject.filter((task) => !task.moduleId);
+      return tasksForSelectedProject.filter((task) => isUnassignedModule(task?.moduleId));
     }
     if (selectedModuleId === ALL_MODULES_KEY) {
       return tasksForSelectedProject;
     }
-    if (!selectedModuleId) {
+    const normalizedSelection = normalizeModuleId(selectedModuleId);
+    if (!normalizedSelection) {
       return [];
     }
-    return tasksForSelectedProject.filter((task) => task.moduleId === selectedModuleId);
+    return tasksForSelectedProject.filter(
+      (task) => normalizeModuleId(task?.moduleId) === normalizedSelection
+    );
   }, [selectedModuleId, tasksForSelectedProject]);
 
   useEffect(() => {
@@ -575,12 +579,13 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify(taskPayload)
       });
+      const resolvedModuleId = resolveModuleId(created.moduleId, modules);
       await loadData({
         projectId: created.projectId,
         moduleId:
           selectedModuleId === ALL_MODULES_KEY
             ? ALL_MODULES_KEY
-            : created.moduleId ?? PROJECT_TASKS_KEY
+            : resolvedModuleId ?? PROJECT_TASKS_KEY
       });
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : '新增任务失败');
@@ -594,14 +599,18 @@ export default function App() {
         method: 'PUT',
         body: JSON.stringify(updates)
       });
+      const nextModuleId =
+        updates.moduleId !== undefined
+          ? resolveModuleId(updates.moduleId, modules)
+          : resolveModuleId(targetTask?.moduleId, modules);
       await loadData({
         projectId: targetTask?.projectId ?? selectedProjectId,
         moduleId:
           selectedModuleId === ALL_MODULES_KEY
             ? ALL_MODULES_KEY
             : updates.moduleId !== undefined
-            ? updates.moduleId ?? PROJECT_TASKS_KEY
-            : targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+            ? nextModuleId ?? PROJECT_TASKS_KEY
+            : nextModuleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
       });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : '更新任务失败');
@@ -614,12 +623,13 @@ export default function App() {
       await requestJson(`/api/tasks/${taskId}`, {
         method: 'DELETE'
       });
+      const resolvedModuleId = resolveModuleId(targetTask?.moduleId, modules);
       await loadData({
         projectId: targetTask?.projectId ?? selectedProjectId,
         moduleId:
           selectedModuleId === ALL_MODULES_KEY
             ? ALL_MODULES_KEY
-            : targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+            : resolvedModuleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
       });
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除任务失败');

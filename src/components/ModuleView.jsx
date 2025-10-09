@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { normalizeModuleId } from '../utils/taskUtils.js';
 
 const flattenTree = (nodes, depth = 0, accumulator = [], options = {}) => {
   const { includeTemplates = true } = options;
@@ -118,7 +119,12 @@ const ModuleView = ({
   const moduleMap = useMemo(() => {
     const map = new Map();
     (Array.isArray(modules) ? modules : []).forEach((item) => {
-      if (item && item.id) {
+      if (!item) return;
+      const normalizedId = normalizeModuleId(item.id);
+      if (normalizedId) {
+        map.set(normalizedId, item);
+      }
+      if (item.id && normalizedId !== item.id) {
         map.set(item.id, item);
       }
     });
@@ -128,8 +134,15 @@ const ModuleView = ({
     if (!selectedModuleId || selectedModuleId === projectTasksKey || selectedModuleId === allModulesKey) {
       return '';
     }
-    return selectedModuleId;
-  }, [allModulesKey, projectTasksKey, selectedModuleId]);
+    const normalizedSelection = normalizeModuleId(selectedModuleId);
+    if (!normalizedSelection) {
+      return '';
+    }
+    const matchedModule = (Array.isArray(modules) ? modules : []).find(
+      (item) => normalizeModuleId(item?.id) === normalizedSelection
+    );
+    return matchedModule?.id || '';
+  }, [allModulesKey, modules, projectTasksKey, selectedModuleId]);
   const stageRemarkMap = useMemo(() => {
     const map = new Map();
     stages.forEach((stage) => {
@@ -453,7 +466,7 @@ const ModuleView = ({
       taskId: null,
       form: {
         ...baseForm,
-        moduleId: task.moduleId || baseForm.moduleId || '',
+        moduleId: normalizeModuleId(task.moduleId) || baseForm.moduleId || '',
         stageId: task.stageId,
         priority: task.priority || baseForm.priority,
         status: task.status || baseForm.status
@@ -469,7 +482,7 @@ const ModuleView = ({
       parentStageTaskId: task.parentStageTaskId || null,
       taskId: task.id,
       form: {
-        moduleId: task.moduleId || '',
+        moduleId: normalizeModuleId(task.moduleId) || '',
         stageId: task.stageId,
         name: task.name,
         taskTypeId: task.taskTypeId || '',
@@ -733,10 +746,11 @@ const ModuleView = ({
                         const workCellText = isTemplate
                           ? '--'
                           : workContentText || (isWorkTimeFilterActive && hasAnyWorkLogs ? '该时间段无记录' : '--');
+                        const normalizedModuleId = normalizeModuleId(node.moduleId);
                         const moduleCellText = isTemplate
                           ? '--'
-                          : node.moduleId
-                          ? moduleMap.get(node.moduleId)?.name || '未知模块'
+                          : normalizedModuleId
+                          ? moduleMap.get(normalizedModuleId)?.name || '未知模块'
                           : '未分配模块';
                         return (
                           <tr key={node.id} className={isTemplate ? 'template-task-row' : undefined}>
