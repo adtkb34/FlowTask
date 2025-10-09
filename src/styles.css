@@ -749,6 +749,41 @@ body {
   align-self: flex-end;
 }
 
+.task-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.task-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.task-filter-field span {
+  font-size: 12px;
+  color: #475569;
+}
+
+.task-filter-field input,
+.task-filter-field select {
+  height: 36px;
+  min-width: 180px;
+}
+
+.task-filter-actions {
+  display: flex;
+  align-items: flex-end;
+}
+
+.task-filter-actions button {
+  height: 36px;
+  padding: 0 16px;
+}
+
 .task-table-container {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
@@ -820,6 +855,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.task-work-cell {
+  max-width: 360px;
+  white-space: normal;
+  color: #334155;
 }
 
 .task-name-title {

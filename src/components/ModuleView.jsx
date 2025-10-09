@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 
 const flattenTree = (nodes, depth = 0, accumulator = [], options = {}) => {
   const { includeTemplates = true } = options;
@@ -20,6 +20,66 @@ const flattenTree = (nodes, depth = 0, accumulator = [], options = {}) => {
     }
   });
   return accumulator;
+};
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_TIME_WITH_SPACE_PATTERN = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$/;
+
+const parseToTimestamp = (value) => {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (DATE_ONLY_PATTERN.test(trimmed)) {
+    const [year, month, day] = trimmed.split('-').map((part) => Number.parseInt(part, 10));
+    if ([year, month, day].some((part) => Number.isNaN(part))) {
+      return null;
+    }
+    return new Date(year, month - 1, day).getTime();
+  }
+  const normalized = DATE_TIME_WITH_SPACE_PATTERN.test(trimmed) ? trimmed.replace(' ', 'T') : trimmed;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return date.getTime();
+};
+
+const formatDateTimeForDisplay = (value) => {
+  const timestamp = parseToTimestamp(value);
+  if (timestamp === null) {
+    return typeof value === 'string' ? value : '';
+  }
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}`;
+};
+
+const buildWorkContentText = (workLogs) => {
+  if (!Array.isArray(workLogs) || workLogs.length === 0) {
+    return '';
+  }
+  return workLogs
+    .map((log) => {
+      const timeText = formatDateTimeForDisplay(log?.workTime);
+      const contentText = typeof log?.content === 'string' ? log.content.trim() : '';
+      if (timeText && contentText) {
+        return `${timeText}：${contentText}`;
+      }
+      if (timeText) {
+        return timeText;
+      }
+      return contentText;
+    })
+    .filter((entry) => typeof entry === 'string' && entry.trim().length > 0)
+    .join('；');
 };
 
 const ModuleView = ({
@@ -193,6 +253,7 @@ const ModuleView = ({
     taskId: null,
     form: emptyForm
   });
+  const [timeFilter, setTimeFilter] = useState({ type: 'start', start: '', end: '' });
 
   const parentTaskOptions = useMemo(() => {
     if (!dialogState.form.stageId) return [];
@@ -246,6 +307,84 @@ const ModuleView = ({
 
     return groups;
   }, [stageMap, stageOrder, stageTemplateMap, taskTreeByStage]);
+
+  const startBoundary = useMemo(() => parseToTimestamp(timeFilter.start), [timeFilter.start]);
+  const endBoundary = useMemo(() => parseToTimestamp(timeFilter.end), [timeFilter.end]);
+  const isFilterActive = useMemo(
+    () => startBoundary !== null || endBoundary !== null,
+    [endBoundary, startBoundary]
+  );
+
+  const isValueWithinRange = useCallback(
+    (value) => {
+      if (!isFilterActive) {
+        return true;
+      }
+      const timestamp = parseToTimestamp(value);
+      if (timestamp === null) {
+        return false;
+      }
+      if (startBoundary !== null && timestamp < startBoundary) {
+        return false;
+      }
+      if (endBoundary !== null && timestamp > endBoundary) {
+        return false;
+      }
+      return true;
+    },
+    [endBoundary, isFilterActive, startBoundary]
+  );
+
+  const filteredStageGroups = useMemo(() => {
+    return stageGroups.map((group) => {
+      const rows = group.rows
+        .map((row) => {
+          if (row.isTemplate) {
+            return isFilterActive ? null : { ...row, displayWorkLogs: [] };
+          }
+          const rawLogs = Array.isArray(row.node.workLogs) ? [...row.node.workLogs] : [];
+          rawLogs.sort((a, b) => {
+            const tsA = parseToTimestamp(a?.workTime);
+            const tsB = parseToTimestamp(b?.workTime);
+            if (tsA === null && tsB === null) return 0;
+            if (tsA === null) return 1;
+            if (tsB === null) return -1;
+            return tsA - tsB;
+          });
+          const logsForDisplay =
+            timeFilter.type === 'work' && isFilterActive
+              ? rawLogs.filter((log) => isValueWithinRange(log?.workTime))
+              : rawLogs;
+          let matches = true;
+          if (isFilterActive) {
+            if (timeFilter.type === 'start') {
+              matches = Boolean(row.node.startDate && isValueWithinRange(row.node.startDate));
+            } else if (timeFilter.type === 'end') {
+              matches = Boolean(row.node.endDate && isValueWithinRange(row.node.endDate));
+            } else {
+              matches = logsForDisplay.length > 0;
+            }
+          }
+          if (!matches) {
+            return null;
+          }
+          return { ...row, displayWorkLogs: logsForDisplay };
+        })
+        .filter(Boolean);
+      return { ...group, rows };
+    });
+  }, [isFilterActive, isValueWithinRange, stageGroups, timeFilter.type]);
+
+  const isWorkTimeFilterActive = timeFilter.type === 'work' && isFilterActive;
+  const emptyStageMessage = isFilterActive ? '该阶段暂无符合筛选条件的任务' : '该阶段暂未创建任务';
+
+  const updateTimeFilter = useCallback((field, value) => {
+    setTimeFilter((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const resetTimeFilter = useCallback(() => {
+    setTimeFilter((prev) => ({ ...prev, start: '', end: '' }));
+  }, []);
 
   const openCreateTaskDialog = () => {
     setDialogState({
@@ -401,6 +540,38 @@ const ModuleView = ({
         </button>
       </div>
 
+      <div className="task-filter-bar">
+        <label className="task-filter-field">
+          <span>筛选类型</span>
+          <select value={timeFilter.type} onChange={(event) => updateTimeFilter('type', event.target.value)}>
+            <option value="start">开始时间</option>
+            <option value="end">结束时间</option>
+            <option value="work">工作时间</option>
+          </select>
+        </label>
+        <label className="task-filter-field">
+          <span>开始时间</span>
+          <input
+            type="datetime-local"
+            value={timeFilter.start}
+            onChange={(event) => updateTimeFilter('start', event.target.value)}
+          />
+        </label>
+        <label className="task-filter-field">
+          <span>结束时间</span>
+          <input
+            type="datetime-local"
+            value={timeFilter.end}
+            onChange={(event) => updateTimeFilter('end', event.target.value)}
+          />
+        </label>
+        <div className="task-filter-actions">
+          <button type="button" className="secondary-action" onClick={resetTimeFilter} disabled={!isFilterActive}>
+            重置时间
+          </button>
+        </div>
+      </div>
+
       <div className="task-table-container">
         <table className="task-table">
           <thead>
@@ -412,16 +583,17 @@ const ModuleView = ({
               <th>状态</th>
               <th>开始日期</th>
               <th>结束日期</th>
+              <th>工作内容</th>
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {stageGroups.map((group) => {
+            {filteredStageGroups.map((group) => {
               const stageRemark = group.stage ? stageRemarkMap.get(group.stage.id) : '';
               return (
                 <Fragment key={group.stageId}>
                   <tr className="stage-header">
-                    <td colSpan={8}>
+                    <td colSpan={9}>
                       <div className="stage-header-content">
                         <span className="stage-header-title">{group.stage?.name || '未命名阶段'}</span>
                         {stageRemark ? (
@@ -432,8 +604,15 @@ const ModuleView = ({
                   </tr>
                   {group.rows.length > 0 ? (
                     <>
-                      {group.rows.map(({ node, depth, isTemplate }) => (
-                        <tr key={node.id} className={isTemplate ? 'template-task-row' : undefined}>
+                      {group.rows.map(({ node, depth, isTemplate, displayWorkLogs = [] }) => {
+                        const workLogsForDisplay = Array.isArray(displayWorkLogs) ? displayWorkLogs : [];
+                        const workContentText = buildWorkContentText(workLogsForDisplay);
+                        const hasAnyWorkLogs = Array.isArray(node.workLogs) && node.workLogs.length > 0;
+                        const workCellText = isTemplate
+                          ? '--'
+                          : workContentText || (isWorkTimeFilterActive && hasAnyWorkLogs ? '该时间段无记录' : '--');
+                        return (
+                          <tr key={node.id} className={isTemplate ? 'template-task-row' : undefined}>
                         <td>
                           <div className="task-name-cell">
                             <div
@@ -465,6 +644,9 @@ const ModuleView = ({
                         <td>{isTemplate ? '--' : node.status}</td>
                         <td>{isTemplate ? '--' : node.startDate || '--'}</td>
                         <td>{isTemplate ? '--' : node.endDate || '--'}</td>
+                        <td className="task-work-cell" title={isTemplate ? undefined : workContentText}>
+                          {workCellText || '--'}
+                        </td>
                         <td>
                           {isTemplate ? (
                             <span className="muted-text">阶段模板任务</span>
@@ -494,12 +676,13 @@ const ModuleView = ({
                             </div>
                           )}
                         </td>
-                      </tr>
-                    ))}
+                          </tr>
+                        );
+                      })}
                   </>
                 ) : (
                   <tr className="empty-row">
-                    <td colSpan={8}>该阶段暂未创建任务</td>
+                    <td colSpan={9}>{emptyStageMessage}</td>
                   </tr>
                 )}
                 </Fragment>
