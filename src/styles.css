@@ -487,6 +487,16 @@ body {
   font-size: 13px;
 }
 
+.table-actions .danger-action {
+  background-color: #fee2e2;
+  color: #b91c1c;
+}
+
+.table-actions .danger-action:hover {
+  background-color: #fecaca;
+  color: #991b1b;
+}
+
 .secondary {
   background-color: #e2e8f0 !important;
   color: #475569 !important;

@@ -31,6 +31,7 @@ const ModuleView = ({
   tasks,
   onAddTask,
   onUpdateTask,
+  onDeleteTask,
   priorities,
   statuses
 }) => {
@@ -353,7 +354,9 @@ const ModuleView = ({
         priority: payload.priority,
         status: payload.status,
         startDate: payload.startDate,
-        endDate: payload.endDate
+        endDate: payload.endDate,
+        parentTaskId: dialogState.parentTaskId,
+        parentStageTaskId: dialogState.parentStageTaskId
       });
     }
 
@@ -475,6 +478,17 @@ const ModuleView = ({
                                 onClick={() => openCreateSubtaskDialog(node)}
                               >
                                 添加子任务
+                              </button>
+                              <button
+                                type="button"
+                                className="danger-action"
+                                onClick={() => {
+                                  if (window.confirm('确定要删除该任务及其子任务吗？')) {
+                                    onDeleteTask(node.id);
+                                  }
+                                }}
+                              >
+                                删除
                               </button>
                             </div>
                           )}
