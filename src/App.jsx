@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import ModuleView from './components/ModuleView.jsx';
+import Dashboard from './components/Dashboard.jsx';
 import Modal from './components/Modal.jsx';
 
 const PRIORITIES = ['低', '中', '高'];
@@ -82,6 +83,7 @@ export default function App() {
 
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [selectedModuleId, setSelectedModuleId] = useState('');
+  const [moduleDistinctionEnabled, setModuleDistinctionEnabled] = useState(false);
 
   const loadData = useCallback(
     async ({ projectId: overrideProjectId, moduleId: overrideModuleId } = {}) => {
@@ -171,6 +173,26 @@ export default function App() {
     }
     return modules.filter((module) => module.projectId === selectedProjectId);
   }, [modules, selectedProjectId]);
+
+  const tasksForSelectedProject = useMemo(() => {
+    if (tasks.length === 0) {
+      return [];
+    }
+    if (!selectedProjectId) {
+      return tasks;
+    }
+    const moduleIds = new Set(modulesForSelectedProject.map((module) => module.id));
+    if (moduleIds.size === 0) {
+      return [];
+    }
+    return tasks.filter((task) => moduleIds.has(task.moduleId));
+  }, [modulesForSelectedProject, selectedProjectId, tasks]);
+
+  useEffect(() => {
+    if (moduleDistinctionEnabled && modulesForSelectedProject.length <= 1) {
+      setModuleDistinctionEnabled(false);
+    }
+  }, [moduleDistinctionEnabled, modulesForSelectedProject.length]);
 
   const closeStageModal = () => {
     setStageModalState({ open: false, mode: 'create', stageId: null, name: '', tasks: [createEmptyStageTask()] });
@@ -800,6 +822,14 @@ export default function App() {
           </div>
 
           <div className="content">
+            <Dashboard
+              project={selectedProject}
+              tasks={tasksForSelectedProject}
+              modules={modulesForSelectedProject}
+              statuses={STATUSES}
+              moduleDistinctionEnabled={moduleDistinctionEnabled}
+              onModuleDistinctionChange={setModuleDistinctionEnabled}
+            />
             <div className="selection-toolbar">
               <label>
                 <span>项目</span>
