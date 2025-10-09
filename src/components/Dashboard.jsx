@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { normalizeModuleId, resolveModuleId } from '../utils/taskUtils.js';
 
 const STATUS_COLORS = {
   未开始: '#94a3b8',
@@ -240,23 +241,41 @@ const Dashboard = ({
     return map;
   }, [modules]);
 
+  const resolveModuleKey = useCallback(
+    (rawModuleId) => {
+      const resolved = resolveModuleId(rawModuleId, modules);
+      if (resolved === null) {
+        return UNASSIGNED_MODULE_KEY;
+      }
+      const normalizedResolved = normalizeModuleId(resolved);
+      if (!normalizedResolved) {
+        return UNASSIGNED_MODULE_KEY;
+      }
+      const matched = modules.find((module) => normalizeModuleId(module.id) === normalizedResolved);
+      return matched?.id ?? UNASSIGNED_MODULE_KEY;
+    },
+    [modules]
+  );
+
   const moduleOptions = useMemo(() => {
     const options = modules.map((module) => ({ id: module.id, label: module.name }));
-    const hasUnassigned = tasks.some((task) => !task.moduleId);
+    const hasUnassigned = tasks.some(
+      (task) => resolveModuleKey(task?.moduleId) === UNASSIGNED_MODULE_KEY
+    );
     if (hasUnassigned) {
       options.push({ id: UNASSIGNED_MODULE_KEY, label: moduleLabelMap.get(UNASSIGNED_MODULE_KEY) });
     }
     return options;
-  }, [modules, tasks, moduleLabelMap]);
+  }, [modules, moduleLabelMap, resolveModuleKey, tasks]);
 
   const moduleTaskCounts = useMemo(() => {
     const counts = new Map();
     tasks.forEach((task) => {
-      const key = task?.moduleId ?? UNASSIGNED_MODULE_KEY;
+      const key = resolveModuleKey(task?.moduleId);
       counts.set(key, (counts.get(key) || 0) + 1);
     });
     return counts;
-  }, [tasks]);
+  }, [resolveModuleKey, tasks]);
 
   const [selectedModuleIds, setSelectedModuleIds] = useState(() => {
     const optionIds = moduleOptions.map((option) => option.id);
@@ -675,7 +694,8 @@ const Dashboard = ({
     }
     const selectedSet = new Set(selectedModuleIds);
     return tasks.filter((task) => {
-      if (!selectedSet.has(task.moduleId ?? UNASSIGNED_MODULE_KEY)) {
+      const moduleKey = resolveModuleKey(task.moduleId);
+      if (!selectedSet.has(moduleKey)) {
         return false;
       }
       for (const [fieldKey, allowedValues] of Object.entries(dimensionFilters)) {
@@ -701,7 +721,7 @@ const Dashboard = ({
       }
       return true;
     });
-  }, [dimensionFilters, selectedModuleIds, tasks]);
+  }, [dimensionFilters, resolveModuleKey, selectedModuleIds, tasks]);
 
   const baseEntries = useMemo(() => {
     if (filteredTasks.length === 0) {
@@ -709,7 +729,7 @@ const Dashboard = ({
     }
     const combos = new Map();
     filteredTasks.forEach((task) => {
-      const moduleKey = task.moduleId ?? UNASSIGNED_MODULE_KEY;
+      const moduleKey = resolveModuleKey(task.moduleId);
       const values = {};
       const labelParts = [];
 
@@ -779,7 +799,8 @@ const Dashboard = ({
     groupingFields,
     groupLabelMap,
     stageNameMap,
-    taskTypeNameMap
+    taskTypeNameMap,
+    resolveModuleKey
   ]);
 
   const coloredEntries = useMemo(() => {
