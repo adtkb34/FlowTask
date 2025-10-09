@@ -121,7 +121,14 @@ class FlowDataController(private val flowDataService: FlowDataService) {
 
     @PostMapping("/tasks")
     fun createTask(@RequestBody request: TaskCreateRequest): Task {
-        validateTaskPayload(request.moduleId, request.stageId, request.name, request.priority, request.status)
+        validateTaskPayload(
+            request.projectId,
+            request.moduleId,
+            request.stageId,
+            request.name,
+            request.priority,
+            request.status
+        )
         if (request.parentTaskId != null && request.parentStageTaskId != null) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
         }
@@ -130,7 +137,7 @@ class FlowDataController(private val flowDataService: FlowDataService) {
 
     @PutMapping("/tasks/{id}")
     fun updateTask(@PathVariable id: String, @RequestBody request: TaskUpdateRequest): Task {
-        validateTaskPayload(null, request.stageId, request.name, request.priority, request.status)
+        validateTaskPayload(null, null, request.stageId, request.name, request.priority, request.status)
         if (request.parentTaskId != null && request.parentStageTaskId != null) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
         }
@@ -144,12 +151,16 @@ class FlowDataController(private val flowDataService: FlowDataService) {
     }
 
     private fun validateTaskPayload(
+        projectId: String?,
         moduleId: String?,
         stageId: String?,
         name: String?,
         priority: String?,
         status: String?
     ) {
+        if (projectId != null && projectId.isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Project is required")
+        }
         if (moduleId != null && moduleId.isBlank()) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Module is required")
         }

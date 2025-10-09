@@ -47,7 +47,8 @@ data class Module(
 
 data class Task(
     val id: String,
-    val moduleId: String,
+    val projectId: String,
+    val moduleId: String?,
     val stageId: String,
     val taskTypeId: String?,
     val name: String,
@@ -104,7 +105,8 @@ data class ModuleRequest(
 )
 
 data class TaskCreateRequest(
-    val moduleId: String,
+    val projectId: String,
+    val moduleId: String?,
     val stageId: String,
     val taskTypeId: String?,
     val name: String,

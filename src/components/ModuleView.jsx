@@ -210,7 +210,7 @@ const ModuleView = ({
       taskId: null,
       form: { ...emptyForm }
     });
-  }, [emptyForm, module.id, workflow.id]);
+  }, [emptyForm, module?.id, workflow.id]);
 
   const stageGroups = useMemo(() => {
     const stageIdSet = new Set(stageOrder);
@@ -329,7 +329,8 @@ const ModuleView = ({
 
     const normalizedTaskTypeId = dialogState.form.taskTypeId ? dialogState.form.taskTypeId : null;
     const payload = {
-      moduleId: module.id,
+      projectId: project.id,
+      moduleId: module?.id ?? null,
       stageId: dialogState.form.stageId,
       taskTypeId: normalizedTaskTypeId,
       name: dialogState.form.name.trim(),

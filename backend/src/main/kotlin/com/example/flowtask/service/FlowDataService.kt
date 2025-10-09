@@ -143,7 +143,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
 
     fun getTasks(): List<Task> {
         val sql = """
-            SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
+            SELECT id, project_id, module_id, stage_id, task_type_id, name, description, priority, status,
                    start_date, end_date, parent_task_id, parent_stage_task_id
             FROM tasks
             ORDER BY created_at, name
@@ -151,6 +151,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         return jdbcTemplate.query(sql) { rs, _ ->
             Task(
                 id = rs.getString("id"),
+                projectId = rs.getString("project_id"),
                 moduleId = rs.getString("module_id"),
                 stageId = rs.getString("stage_id"),
                 taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
@@ -420,9 +421,29 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             }
         }
 
+        val projectExists = jdbcTemplate.query(
+            "SELECT id FROM projects WHERE id = :id",
+            mapOf("id" to request.projectId)
+        ) { rs, _ -> rs.getString("id") }.isNotEmpty()
+        if (!projectExists) {
+            throw IllegalArgumentException("Project not found")
+        }
+
+        request.moduleId?.let { moduleId ->
+            val moduleProjectId = jdbcTemplate.query(
+                "SELECT project_id FROM modules WHERE id = :id",
+                mapOf("id" to moduleId)
+            ) { rs, _ -> rs.getString("project_id") }
+                .firstOrNull() ?: throw IllegalArgumentException("Module not found")
+            if (moduleProjectId != request.projectId) {
+                throw IllegalArgumentException("Module does not belong to the selected project")
+            }
+        }
+
         val id = UUID.randomUUID().toString()
         val params = MapSqlParameterSource()
             .addValue("id", id)
+            .addValue("projectId", request.projectId)
             .addValue("moduleId", request.moduleId)
             .addValue("stageId", request.stageId)
             .addValue("taskTypeId", request.taskTypeId)
@@ -436,8 +457,8 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             .addValue("parentStageTaskId", request.parentStageTaskId)
         jdbcTemplate.update(
             """
-                INSERT INTO tasks(id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id, parent_stage_task_id)
-                VALUES (:id, :moduleId, :stageId, :taskTypeId, :name, :description, :priority, :status, :startDate, :endDate, :parentTaskId, :parentStageTaskId)
+                INSERT INTO tasks(id, project_id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id, parent_stage_task_id)
+                VALUES (:id, :projectId, :moduleId, :stageId, :taskTypeId, :name, :description, :priority, :status, :startDate, :endDate, :parentTaskId, :parentStageTaskId)
             """.trimIndent(),
             params
         )
@@ -528,7 +549,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
 
     private fun findTaskById(id: String): Task {
         val sql = """
-            SELECT id, module_id, stage_id, task_type_id, name, description, priority, status,
+            SELECT id, project_id, module_id, stage_id, task_type_id, name, description, priority, status,
                    start_date, end_date, parent_task_id, parent_stage_task_id
             FROM tasks
             WHERE id = :id
@@ -536,6 +557,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         return jdbcTemplate.queryForObject(sql, mapOf("id" to id)) { rs, _ ->
             Task(
                 id = rs.getString("id"),
+                projectId = rs.getString("project_id"),
                 moduleId = rs.getString("module_id"),
                 stageId = rs.getString("stage_id"),
                 taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
