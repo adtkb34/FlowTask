@@ -240,6 +240,7 @@ const Dashboard = ({
   }, [modules, tasks, moduleLabelMap]);
 
   const [selectedModuleIds, setSelectedModuleIds] = useState(() => moduleOptions.map((option) => option.id));
+  const [modulesExpanded, setModulesExpanded] = useState(true);
 
   useEffect(() => {
     const optionIds = moduleOptions.map((option) => option.id);
@@ -513,6 +514,37 @@ const Dashboard = ({
     }));
   }, []);
 
+  const toggleModuleExpansion = useCallback(() => {
+    setModulesExpanded((prev) => !prev);
+  }, []);
+
+  const handleModuleSelectAll = useCallback(
+    (checked) => {
+      if (checked) {
+        setSelectedModuleIds(moduleOptions.map((option) => option.id));
+      } else {
+        setSelectedModuleIds([]);
+      }
+    },
+    [moduleOptions]
+  );
+
+  const handleModuleToggle = useCallback(
+    (moduleId, checked) => {
+      setSelectedModuleIds((prev) => {
+        const optionOrder = moduleOptions.map((option) => option.id);
+        const selectedSet = new Set(prev);
+        if (checked) {
+          selectedSet.add(moduleId);
+        } else {
+          selectedSet.delete(moduleId);
+        }
+        return optionOrder.filter((id) => selectedSet.has(id));
+      });
+    },
+    [moduleOptions]
+  );
+
   const stageNameMap = useMemo(() => new Map(stages.map((stage) => [stage.id, stage.name])), [stages]);
   const taskTypeNameMap = useMemo(
     () => new Map(taskTypes.map((taskType) => [taskType.id, taskType.name])),
@@ -742,46 +774,57 @@ const Dashboard = ({
       </div>
 
       <div className="dashboard-controls">
-        <div className="dashboard-filter-group">
-          <div className="dashboard-filter-title">模块筛选</div>
-          {moduleOptions.length > 0 ? (
-            <div className="dashboard-checkbox-grid">
-              {moduleOptions.map((option) => {
-                const checked = selectedModuleIds.includes(option.id);
-                return (
-                  <label key={option.id}>
+        <div className="dashboard-filter-tree">
+          <div className="dashboard-tree-node">
+            <div className="dashboard-tree-header">
+              <button
+                type="button"
+                className="dashboard-tree-expander"
+                onClick={toggleModuleExpansion}
+                aria-expanded={modulesExpanded}
+                aria-label={modulesExpanded ? '折叠模块选项' : '展开模块选项'}
+              >
+                {modulesExpanded ? '▾' : '▸'}
+              </button>
+              <span className="dashboard-tree-label">模块</span>
+              <span className="dashboard-tree-count">
+                {selectedModuleIds.length}/{moduleOptions.length}
+              </span>
+            </div>
+            {modulesExpanded ? (
+              <div className="dashboard-tree-children">
+                <label className="dashboard-tree-child">
+                  <IndeterminateCheckbox
+                    type="checkbox"
+                    checked={moduleOptions.length > 0 && selectedModuleIds.length === moduleOptions.length}
+                    indeterminate={
+                      moduleOptions.length > 0 &&
+                      selectedModuleIds.length > 0 &&
+                      selectedModuleIds.length < moduleOptions.length
+                    }
+                    onChange={(event) => handleModuleSelectAll(event.target.checked)}
+                    disabled={moduleOptions.length === 0}
+                  />
+                  <span>全选</span>
+                </label>
+                {moduleOptions.map((option) => (
+                  <label key={option.id} className="dashboard-tree-child">
                     <input
                       type="checkbox"
-                      checked={checked}
-                      onChange={(event) => {
-                        const { checked: isChecked } = event.target;
-                        setSelectedModuleIds((prev) => {
-                          if (isChecked) {
-                            if (prev.includes(option.id)) return prev;
-                            return [...prev, option.id];
-                          }
-                          if (prev.length <= 1) {
-                            return prev;
-                          }
-                          const next = prev.filter((id) => id !== option.id);
-                          return next.length === 0 ? prev : next;
-                        });
-                      }}
+                      checked={selectedModuleIds.includes(option.id)}
+                      onChange={(event) => handleModuleToggle(option.id, event.target.checked)}
                     />
-                    {option.label}
+                    <span>{option.label}</span>
                   </label>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="dashboard-filter-empty">暂无模块可筛选</div>
-          )}
-        </div>
+                ))}
+                {moduleOptions.length === 0 ? (
+                  <div className="dashboard-tree-empty">暂无模块可筛选</div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
 
-        <div className="dashboard-filter-group">
-          <div className="dashboard-filter-title">饼图维度</div>
-          <div className="dashboard-filter-tree">
-            {GROUPING_FIELDS.map((field) => {
+          {GROUPING_FIELDS.map((field) => {
               const selection = dimensionSelectionState[field.key];
               const options = dimensionValueOptions[field.key] || [];
               const expanded = expandedDimensions[field.key];
@@ -846,9 +889,8 @@ const Dashboard = ({
                 </div>
               );
             })}
-          </div>
-          <p className="dashboard-filter-hint">未启用维度时将按状态统计</p>
         </div>
+        <p className="dashboard-filter-hint">未启用维度时将按状态统计</p>
       </div>
 
       <div className="dashboard-body">
