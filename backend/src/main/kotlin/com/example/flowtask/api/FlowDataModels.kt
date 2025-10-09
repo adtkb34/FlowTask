@@ -35,7 +35,7 @@ data class Workflow(
 data class Project(
     val id: String,
     val name: String,
-    val workflowId: String
+    val workflowId: String?
 )
 
 data class Module(
