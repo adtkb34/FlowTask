@@ -124,7 +124,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             Project(
                 id = rs.getString("id"),
                 name = rs.getString("name"),
-                workflowId = rs.getString("workflow_id")
+                workflowId = rs.getString("workflow_id")?.takeIf { it.isNotBlank() }
             )
         }
     }
@@ -354,7 +354,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 .addValue("name", request.name.trim())
                 .addValue("workflowId", request.workflowId)
         )
-        return Project(id, request.name.trim(), request.workflowId)
+        return Project(id, request.name.trim(), request.workflowId.trim())
     }
 
     @Transactional
@@ -369,7 +369,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         if (rows == 0) {
             throw EmptyResultDataAccessException(1)
         }
-        return Project(id, request.name.trim(), request.workflowId)
+        return Project(id, request.name.trim(), request.workflowId.trim())
     }
 
     @Transactional
