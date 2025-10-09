@@ -5,6 +5,7 @@ import Modal from './components/Modal.jsx';
 
 const PRIORITIES = ['低', '中', '高'];
 const STATUSES = ['未开始', '进行中', '已完成'];
+const PROJECT_TASKS_KEY = '__project__';
 
 const createEmptyStageTask = () => ({ name: '', subtasks: [''] });
 
@@ -82,7 +83,7 @@ export default function App() {
   });
 
   const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [selectedModuleId, setSelectedModuleId] = useState('');
+  const [selectedModuleId, setSelectedModuleId] = useState(PROJECT_TASKS_KEY);
   const [moduleDistinctionEnabled, setModuleDistinctionEnabled] = useState(false);
 
   const loadData = useCallback(
@@ -103,10 +104,17 @@ export default function App() {
           nextProjectId = data.projects[0]?.id || '';
         }
 
+        const projectModules = data.modules.filter((module) => module.projectId === nextProjectId);
+        const moduleIds = new Set(projectModules.map((module) => module.id));
         let nextModuleId = overrideModuleId ?? selectedModuleId;
-        if (!data.modules.some((module) => module.id === nextModuleId)) {
-          const projectScopedModule = data.modules.find((module) => module.projectId === nextProjectId);
-          nextModuleId = projectScopedModule?.id || data.modules[0]?.id || '';
+        if (nextModuleId !== PROJECT_TASKS_KEY && !moduleIds.has(nextModuleId)) {
+          nextModuleId = projectModules[0]?.id || PROJECT_TASKS_KEY;
+        }
+        if (!nextModuleId) {
+          nextModuleId = moduleIds.size > 0 ? projectModules[0]?.id : PROJECT_TASKS_KEY;
+        }
+        if (!moduleIds.has(nextModuleId) && nextModuleId !== PROJECT_TASKS_KEY) {
+          nextModuleId = PROJECT_TASKS_KEY;
         }
 
         setSelectedProjectId(nextProjectId);
@@ -156,10 +164,14 @@ export default function App() {
     [projects, selectedProjectId]
   );
 
-  const selectedModule = useMemo(
-    () => modules.find((module) => module.id === selectedModuleId) || null,
-    [modules, selectedModuleId]
-  );
+  const selectedModule = useMemo(() => {
+    if (selectedModuleId === PROJECT_TASKS_KEY) {
+      return selectedProject
+        ? { id: null, projectId: selectedProject.id, name: '项目任务（未分配模块）', workflowId: null }
+        : null;
+    }
+    return modules.find((module) => module.id === selectedModuleId) || null;
+  }, [modules, selectedModuleId, selectedProject]);
 
   const selectedWorkflow = useMemo(() => {
     if (!selectedModule || !selectedProject) return null;
@@ -181,12 +193,18 @@ export default function App() {
     if (!selectedProjectId) {
       return tasks;
     }
-    const moduleIds = new Set(modulesForSelectedProject.map((module) => module.id));
-    if (moduleIds.size === 0) {
+    return tasks.filter((task) => task.projectId === selectedProjectId);
+  }, [selectedProjectId, tasks]);
+
+  const tasksForCurrentSelection = useMemo(() => {
+    if (selectedModuleId === PROJECT_TASKS_KEY) {
+      return tasksForSelectedProject.filter((task) => !task.moduleId);
+    }
+    if (!selectedModuleId) {
       return [];
     }
-    return tasks.filter((task) => moduleIds.has(task.moduleId));
-  }, [modulesForSelectedProject, selectedProjectId, tasks]);
+    return tasksForSelectedProject.filter((task) => task.moduleId === selectedModuleId);
+  }, [selectedModuleId, tasksForSelectedProject]);
 
   useEffect(() => {
     if (moduleDistinctionEnabled && modulesForSelectedProject.length <= 1) {
@@ -278,9 +296,12 @@ export default function App() {
     const nextProjectId = event.target.value;
     setSelectedProjectId(nextProjectId);
     const projectModules = modules.filter((module) => module.projectId === nextProjectId);
-    const nextModuleId = projectModules.some((module) => module.id === selectedModuleId)
-      ? selectedModuleId
-      : projectModules[0]?.id || '';
+    const nextModuleId =
+      selectedModuleId === PROJECT_TASKS_KEY
+        ? PROJECT_TASKS_KEY
+        : projectModules.some((module) => module.id === selectedModuleId)
+        ? selectedModuleId
+        : projectModules[0]?.id || PROJECT_TASKS_KEY;
     setSelectedModuleId(nextModuleId);
   };
 
@@ -545,8 +566,10 @@ export default function App() {
         method: 'POST',
         body: JSON.stringify(taskPayload)
       });
-      const moduleInfo = modules.find((module) => module.id === created.moduleId);
-      await loadData({ projectId: moduleInfo?.projectId, moduleId: created.moduleId });
+      await loadData({
+        projectId: created.projectId,
+        moduleId: created.moduleId ?? PROJECT_TASKS_KEY
+      });
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : '新增任务失败');
     }
@@ -559,8 +582,10 @@ export default function App() {
         method: 'PUT',
         body: JSON.stringify(updates)
       });
-      const moduleInfo = targetTask ? modules.find((module) => module.id === targetTask.moduleId) : null;
-      await loadData({ projectId: moduleInfo?.projectId, moduleId: targetTask?.moduleId });
+      await loadData({
+        projectId: targetTask?.projectId ?? selectedProjectId,
+        moduleId: targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+      });
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : '更新任务失败');
     }
@@ -572,8 +597,10 @@ export default function App() {
       await requestJson(`/api/tasks/${taskId}`, {
         method: 'DELETE'
       });
-      const moduleInfo = targetTask ? modules.find((module) => module.id === targetTask.moduleId) : null;
-      await loadData({ projectId: moduleInfo?.projectId, moduleId: targetTask?.moduleId });
+      await loadData({
+        projectId: targetTask?.projectId ?? selectedProjectId,
+        moduleId: targetTask?.moduleId ?? (targetTask ? PROJECT_TASKS_KEY : selectedModuleId)
+      });
     } catch (deleteError) {
       setError(deleteError instanceof Error ? deleteError.message : '删除任务失败');
     }
@@ -840,6 +867,9 @@ export default function App() {
               tasks={tasksForSelectedProject}
               modules={modulesForSelectedProject}
               statuses={STATUSES}
+              stages={stages}
+              taskTypes={taskTypes}
+              priorities={PRIORITIES}
               moduleDistinctionEnabled={moduleDistinctionEnabled}
               onModuleDistinctionChange={setModuleDistinctionEnabled}
             />
@@ -864,13 +894,11 @@ export default function App() {
               <label>
                 <span>模块</span>
                 <select
-                  value={selectedModuleId || ''}
+                  value={selectedModuleId}
                   onChange={handleModuleSelectionChange}
-                  disabled={modulesForSelectedProject.length === 0}
+                  disabled={!selectedProjectId}
                 >
-                  <option value="" disabled>
-                    请选择模块
-                  </option>
+                  <option value={PROJECT_TASKS_KEY}>项目任务（未分配模块）</option>
                   {modulesForSelectedProject.map((module) => (
                     <option key={module.id} value={module.id}>
                       {module.name}
@@ -892,7 +920,7 @@ export default function App() {
                 workflow={selectedWorkflow}
                 stages={stages}
                 taskTypes={taskTypes}
-                tasks={tasks.filter((task) => task.moduleId === selectedModule.id)}
+                tasks={tasksForCurrentSelection}
                 onAddTask={handleAddTask}
                 onUpdateTask={handleUpdateTask}
                 onDeleteTask={handleDeleteTask}
