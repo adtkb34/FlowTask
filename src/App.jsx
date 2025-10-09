@@ -566,6 +566,19 @@ export default function App() {
     }
   };
 
+  const handleDeleteTask = async (taskId) => {
+    try {
+      const targetTask = tasks.find((task) => task.id === taskId);
+      await requestJson(`/api/tasks/${taskId}`, {
+        method: 'DELETE'
+      });
+      const moduleInfo = targetTask ? modules.find((module) => module.id === targetTask.moduleId) : null;
+      await loadData({ projectId: moduleInfo?.projectId, moduleId: targetTask?.moduleId });
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除任务失败');
+    }
+  };
+
   const stageOptions = stages;
 
   return (
@@ -882,6 +895,7 @@ export default function App() {
                 tasks={tasks.filter((task) => task.moduleId === selectedModule.id)}
                 onAddTask={handleAddTask}
                 onUpdateTask={handleUpdateTask}
+                onDeleteTask={handleDeleteTask}
                 priorities={PRIORITIES}
                 statuses={STATUSES}
               />

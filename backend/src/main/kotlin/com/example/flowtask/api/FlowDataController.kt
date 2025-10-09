@@ -2,6 +2,7 @@ package com.example.flowtask.api
 
 import com.example.flowtask.service.FlowDataService
 import org.springframework.http.HttpStatus
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -130,7 +131,16 @@ class FlowDataController(private val flowDataService: FlowDataService) {
     @PutMapping("/tasks/{id}")
     fun updateTask(@PathVariable id: String, @RequestBody request: TaskUpdateRequest): Task {
         validateTaskPayload(null, request.stageId, request.name, request.priority, request.status)
+        if (request.parentTaskId != null && request.parentStageTaskId != null) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Task cannot have both parent task and parent stage task")
+        }
         return flowDataService.updateTask(id, request)
+    }
+
+    @DeleteMapping("/tasks/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun deleteTask(@PathVariable id: String) {
+        flowDataService.deleteTask(id)
     }
 
     private fun validateTaskPayload(

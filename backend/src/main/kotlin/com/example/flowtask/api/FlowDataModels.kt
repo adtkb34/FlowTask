@@ -125,5 +125,7 @@ data class TaskUpdateRequest(
     val priority: String,
     val status: String,
     val startDate: String?,
-    val endDate: String?
+    val endDate: String?,
+    val parentTaskId: String?,
+    val parentStageTaskId: String?
 )

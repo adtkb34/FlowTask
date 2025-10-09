@@ -446,6 +446,23 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
 
     @Transactional
     fun updateTask(id: String, request: TaskUpdateRequest): Task {
+        if (request.parentTaskId != null && request.parentStageTaskId != null) {
+            throw IllegalArgumentException("Task cannot have both parent task and parent stage task")
+        }
+
+        request.parentStageTaskId?.let { parentStageTaskId ->
+            val parentStageId = jdbcTemplate.query(
+                "SELECT stage_id FROM stage_tasks WHERE id = :id",
+                mapOf("id" to parentStageTaskId)
+            ) { rs, _ ->
+                rs.getString("stage_id")
+            }.firstOrNull() ?: throw IllegalArgumentException("Parent stage task not found")
+
+            if (parentStageId != request.stageId) {
+                throw IllegalArgumentException("Parent stage task belongs to a different stage")
+            }
+        }
+
         val rows = jdbcTemplate.update(
             """
                 UPDATE tasks
@@ -456,7 +473,9 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                     priority = :priority,
                     status = :status,
                     start_date = :startDate,
-                    end_date = :endDate
+                    end_date = :endDate,
+                    parent_task_id = :parentTaskId,
+                    parent_stage_task_id = :parentStageTaskId
                 WHERE id = :id
             """.trimIndent(),
             MapSqlParameterSource()
@@ -469,11 +488,42 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
                 .addValue("status", request.status)
                 .addValue("startDate", parseDate(request.startDate))
                 .addValue("endDate", parseDate(request.endDate))
+                .addValue("parentTaskId", request.parentTaskId)
+                .addValue("parentStageTaskId", request.parentStageTaskId)
         )
         if (rows == 0) {
             throw EmptyResultDataAccessException(1)
         }
         return findTaskById(id)
+    }
+
+    @Transactional
+    fun deleteTask(id: String) {
+        // Ensure task exists before attempting deletion
+        findTaskById(id)
+
+        val idsToDelete = mutableListOf<String>()
+        val stack = ArrayDeque<String>()
+        stack.add(id)
+
+        while (stack.isNotEmpty()) {
+            val current = stack.removeLast()
+            idsToDelete.add(current)
+            val children = jdbcTemplate.query(
+                "SELECT id FROM tasks WHERE parent_task_id = :parentId",
+                mapOf("parentId" to current)
+            ) { rs, _ ->
+                rs.getString("id")
+            }
+            children.forEach { childId -> stack.add(childId) }
+        }
+
+        if (idsToDelete.isNotEmpty()) {
+            jdbcTemplate.update(
+                "DELETE FROM tasks WHERE id IN (:ids)",
+                mapOf("ids" to idsToDelete)
+            )
+        }
     }
 
     private fun findTaskById(id: String): Task {
