@@ -61,32 +61,3 @@ CREATE TABLE tasks (
     CONSTRAINT fk_task_task_type FOREIGN KEY (task_type_id) REFERENCES task_types(id),
     CONSTRAINT fk_task_parent FOREIGN KEY (parent_task_id) REFERENCES tasks(id)
 );
-
-INSERT INTO stages (id, name) VALUES
-  ('stage-plan', '规划'),
-  ('stage-build', '开发'),
-  ('stage-review', '验收');
-
-INSERT INTO task_types (id, name) VALUES
-  ('type-feature', '功能'),
-  ('type-bug', '缺陷修复'),
-  ('type-doc', '文档');
-
-INSERT INTO workflows (id, name) VALUES
-  ('workflow-default', '标准产品流程');
-
-INSERT INTO workflow_stages (workflow_id, stage_id, sort_order) VALUES
-  ('workflow-default', 'stage-plan', 0),
-  ('workflow-default', 'stage-build', 1),
-  ('workflow-default', 'stage-review', 2);
-
-INSERT INTO projects (id, name, workflow_id) VALUES
-  ('project-alpha', 'Alpha 项目', 'workflow-default');
-
-INSERT INTO modules (id, project_id, name, workflow_id) VALUES
-  ('module-alpha-core', 'project-alpha', '核心模块', NULL),
-  ('module-alpha-mobile', 'project-alpha', '移动端', 'workflow-default');
-
-INSERT INTO tasks (id, module_id, stage_id, task_type_id, name, description, priority, status, start_date, end_date, parent_task_id) VALUES
-  ('task-1', 'module-alpha-core', 'stage-plan', 'type-feature', '需求梳理', '梳理 MVP 范围', '高', '进行中', '2024-06-01', '2024-06-07', NULL),
-  ('task-1-1', 'module-alpha-core', 'stage-plan', 'type-doc', 'PRD 草稿', '完成初版 PRD 文档', '中', '未开始', NULL, NULL, 'task-1');

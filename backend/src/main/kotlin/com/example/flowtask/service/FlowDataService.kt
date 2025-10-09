@@ -150,21 +150,22 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         """
         return jdbcTemplate.query(sql) { rs, _ ->
             Task(
-                id = rs.getString("id"),
-                projectId = rs.getString("project_id"),
-                moduleId = rs.getString("module_id"),
-                stageId = rs.getString("stage_id"),
-                taskTypeId = rs.getString("task_type_id")?.takeIf { it.isNotBlank() },
-                name = rs.getString("name"),
-                description = rs.getString("description"),
-                priority = rs.getString("priority"),
-                status = rs.getString("status"),
-                startDate = rs.getString("start_date"),
-                endDate = rs.getString("end_date"),
-                parentTaskId = rs.getString("parent_task_id"),
-                parentStageTaskId = rs.getString("parent_stage_task_id")
+                id = rs.getString("id") ?: "",
+                projectId = rs.getString("project_id") ?: "",
+                moduleId = rs.getString("module_id") ?: "",
+                stageId = rs.getString("stage_id") ?: "",
+                taskTypeId = rs.getString("task_type_id") ?: "",
+                name = rs.getString("name") ?: "",
+                description = rs.getString("description") ?: "",
+                priority = rs.getString("priority") ?: "",
+                status = rs.getString("status") ?: "",
+                startDate = rs.getString("start_date") ?: "",
+                endDate = rs.getString("end_date") ?: "",
+                parentTaskId = rs.getString("parent_task_id") ?: "",
+                parentStageTaskId = rs.getString("parent_stage_task_id") ?: ""
             )
         }
+
     }
 
     @Transactional
