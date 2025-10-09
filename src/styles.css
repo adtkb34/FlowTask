@@ -726,6 +726,23 @@ body {
   font-weight: 600;
 }
 
+.stage-header-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stage-header-title {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.stage-header-remark {
+  font-size: 12px;
+  font-weight: 400;
+  color: #334155;
+}
+
 .task-name-cell {
   display: flex;
   flex-direction: column;
