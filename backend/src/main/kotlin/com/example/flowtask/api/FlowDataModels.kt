@@ -69,6 +69,11 @@ data class TaskWorkLog(
     val content: String
 )
 
+data class TaskWorkLogRequest(
+    val workTime: String,
+    val content: String
+)
+
 data class FlowDataResponse(
     val stages: List<Stage>,
     val taskTypes: List<TaskType>,
@@ -124,10 +129,12 @@ data class TaskCreateRequest(
     val startDate: String?,
     val endDate: String?,
     val parentTaskId: String?,
-    val parentStageTaskId: String?
+    val parentStageTaskId: String?,
+    val workLogs: List<TaskWorkLogRequest> = emptyList()
 )
 
 data class TaskUpdateRequest(
+    val moduleId: String?,
     val stageId: String,
     val taskTypeId: String?,
     val name: String,
@@ -137,5 +144,6 @@ data class TaskUpdateRequest(
     val startDate: String?,
     val endDate: String?,
     val parentTaskId: String?,
-    val parentStageTaskId: String?
+    val parentStageTaskId: String?,
+    val workLogs: List<TaskWorkLogRequest> = emptyList()
 )

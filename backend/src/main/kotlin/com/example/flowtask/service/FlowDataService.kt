@@ -7,7 +7,10 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.jdbc.core.namedparam.SqlParameterSource
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.sql.Timestamp
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.UUID
 
@@ -438,7 +441,9 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             throw IllegalArgumentException("Project not found")
         }
 
-        request.moduleId?.let { moduleId ->
+        val normalizedModuleId = request.moduleId?.takeIf { it.isNotBlank() }
+
+        normalizedModuleId?.let { moduleId ->
             val moduleProjectId = jdbcTemplate.query(
                 "SELECT project_id FROM modules WHERE id = :id",
                 mapOf("id" to moduleId)
@@ -453,7 +458,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         val params = MapSqlParameterSource()
             .addValue("id", id)
             .addValue("projectId", request.projectId)
-            .addValue("moduleId", request.moduleId)
+            .addValue("moduleId", normalizedModuleId)
             .addValue("stageId", request.stageId)
             .addValue("taskTypeId", request.taskTypeId)
             .addValue("name", request.name.trim())
@@ -471,6 +476,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             """.trimIndent(),
             params
         )
+        saveTaskWorkLogs(id, request.workLogs)
         return findTaskById(id)
     }
 
@@ -479,6 +485,9 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         if (request.parentTaskId != null && request.parentStageTaskId != null) {
             throw IllegalArgumentException("Task cannot have both parent task and parent stage task")
         }
+
+        val existingTask = findTaskById(id)
+        val normalizedModuleId = request.moduleId?.takeIf { it.isNotBlank() }
 
         request.parentStageTaskId?.let { parentStageTaskId ->
             val parentStageId = jdbcTemplate.query(
@@ -493,10 +502,22 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             }
         }
 
+        normalizedModuleId?.let { moduleId ->
+            val moduleProjectId = jdbcTemplate.query(
+                "SELECT project_id FROM modules WHERE id = :id",
+                mapOf("id" to moduleId)
+            ) { rs, _ -> rs.getString("project_id") }
+                .firstOrNull() ?: throw IllegalArgumentException("Module not found")
+            if (moduleProjectId != existingTask.projectId) {
+                throw IllegalArgumentException("Module does not belong to the task project")
+            }
+        }
+
         val rows = jdbcTemplate.update(
             """
                 UPDATE tasks
-                SET stage_id = :stageId,
+                SET module_id = :moduleId,
+                    stage_id = :stageId,
                     task_type_id = :taskTypeId,
                     name = :name,
                     description = :description,
@@ -510,6 +531,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("id", id)
+                .addValue("moduleId", normalizedModuleId)
                 .addValue("stageId", request.stageId)
                 .addValue("taskTypeId", request.taskTypeId)
                 .addValue("name", request.name.trim())
@@ -524,6 +546,7 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
         if (rows == 0) {
             throw EmptyResultDataAccessException(1)
         }
+        saveTaskWorkLogs(id, request.workLogs)
         return findTaskById(id)
     }
 
@@ -591,6 +614,66 @@ class FlowDataService(private val jdbcTemplate: NamedParameterJdbcTemplate) {
             LocalDate.parse(value)
         } catch (ex: DateTimeParseException) {
             throw IllegalArgumentException("Invalid date format: $value", ex)
+        }
+    }
+
+    private fun parseDateTime(value: String): LocalDateTime {
+        val normalized = value.trim().ifEmpty {
+            throw IllegalArgumentException("Work log time is required")
+        }
+        val candidate = normalized.replace(' ', 'T')
+        val formatters = listOf(
+            DateTimeFormatter.ISO_LOCAL_DATE_TIME,
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+        )
+        formatters.forEach { formatter ->
+            try {
+                return LocalDateTime.parse(candidate, formatter)
+            } catch (_: DateTimeParseException) {
+                // try next formatter
+            }
+        }
+        if (candidate.length >= 10) {
+            return try {
+                LocalDate.parse(candidate.substring(0, 10)).atStartOfDay()
+            } catch (ex: Exception) {
+                throw IllegalArgumentException("Invalid date format: $value", ex)
+            }
+        }
+        throw IllegalArgumentException("Invalid date format: $value")
+    }
+
+    private fun saveTaskWorkLogs(taskId: String, logs: List<TaskWorkLogRequest>) {
+        jdbcTemplate.update(
+            "DELETE FROM task_work_logs WHERE task_id = :taskId",
+            mapOf("taskId" to taskId)
+        )
+        if (logs.isEmpty()) {
+            return
+        }
+
+        val sql = """
+            INSERT INTO task_work_logs(id, task_id, work_time, content)
+            VALUES (:id, :taskId, :workTime, :content)
+        """.trimIndent()
+
+        logs.mapNotNull { log ->
+            val trimmedContent = log.content.trim()
+            if (trimmedContent.isEmpty()) {
+                null
+            } else {
+                val workTime = parseDateTime(log.workTime)
+                Triple(UUID.randomUUID().toString(), Timestamp.valueOf(workTime), trimmedContent)
+            }
+        }.forEach { (id, workTime, content) ->
+            jdbcTemplate.update(
+                sql,
+                MapSqlParameterSource()
+                    .addValue("id", id)
+                    .addValue("taskId", taskId)
+                    .addValue("workTime", workTime)
+                    .addValue("content", content)
+            )
         }
     }
 
