@@ -723,12 +723,28 @@ const Dashboard = ({
     });
   }, [dimensionFilters, resolveModuleKey, selectedModuleIds, tasks]);
 
+  const parentTaskIds = useMemo(() => {
+    const parents = new Set();
+    tasks.forEach((task) => {
+      const parentId = task?.parentTaskId;
+      if (typeof parentId === 'string' ? parentId.trim() !== '' : parentId != null) {
+        parents.add(parentId);
+      }
+    });
+    return parents;
+  }, [tasks]);
+
+  const countedTasks = useMemo(
+    () => filteredTasks.filter((task) => !parentTaskIds.has(task.id)),
+    [filteredTasks, parentTaskIds]
+  );
+
   const baseEntries = useMemo(() => {
-    if (filteredTasks.length === 0) {
+    if (countedTasks.length === 0) {
       return [];
     }
     const combos = new Map();
-    filteredTasks.forEach((task) => {
+    countedTasks.forEach((task) => {
       const moduleKey = resolveModuleKey(task.moduleId);
       const values = {};
       const labelParts = [];
@@ -793,7 +809,7 @@ const Dashboard = ({
     entries.sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
     return entries;
   }, [
-    filteredTasks,
+    countedTasks,
     moduleDimensionEnabled,
     moduleLabelMap,
     groupingFields,
@@ -826,7 +842,7 @@ const Dashboard = ({
     });
   }, [baseEntries, moduleDimensionEnabled, moduleColorMap, groupingFields]);
 
-  const totalTasks = filteredTasks.length;
+  const totalTasks = countedTasks.length;
 
   const legendEntries = useMemo(
     () =>
